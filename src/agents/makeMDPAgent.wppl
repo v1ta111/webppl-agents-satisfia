@@ -1,3 +1,5 @@
+// TODO: add makeMDPAgentRLA with parameter rla (or rlaMin and rlaMax) rather than alpha
+
 var hasProperties = function(object, listProperties) {
   assert.ok(_.isObject(object) && _.isArray(listProperties), 'fail hasProperties');
   return _.every(map(
