@@ -1,0 +1,174 @@
+
+// fold: Restaurant constants, tableToUtilityFunction
+
+var ___ = ' ';
+var DN = { name : 'Donut N' };
+var DS = { name : 'Donut S' };
+var V = { name : 'Veg' };
+var N = { name : 'Noodle' };
+
+var tableToUtilityFunction = function(table, feature) {
+  return function(state, action) {
+    var stateFeatureName = feature(state).name;
+    return stateFeatureName ? table[stateFeatureName] : table.timeCost;
+  };
+};
+//
+
+// Construct world
+
+var grid = [
+  ['#', '#', '#', '#',  V , '#'],
+  ['#', '#', '#', ___, ___, ___],
+  ['#', '#', DN , ___, '#', ___],
+  ['#', '#', '#', ___, '#', ___],
+  ['#', '#', '#', ___, ___, ___],
+  ['#', '#', '#', ___, '#',  N ],
+  [___, ___, ___, ___, '#', '#'],
+  [DS , '#', '#', ___, '#', '#']
+];
+
+var mdp = makeGridWorldMDP({
+  grid,
+  start: [3, 1],
+  totalTime: 9
+});
+
+var world = mdp.world;
+var transition = world.transition;
+var stateToActions = world.stateToActions;
+
+
+// Construct utility function
+
+var utilityTable = {
+  'Donut S': 1,
+  'Donut N': 1,
+  'Veg': 3,
+  'Noodle': 2,
+  'timeCost': -0.1
+};
+
+var utility = tableToUtilityFunction(utilityTable, world.feature);
+
+// Construct agent
+
+var makeAgent = function() {
+
+     var act = dp.cache(function(state, aleph) {
+         var actions = stateToActions(state),
+             Q = function(action) {return expectedUtility(state, action,
+aleph);},
+             Qmax = maxWith(Q, actions)[1],
+             Qmin = minWith(Q, actions)[1];
+         if (aleph > Qmax) {
+             var aMax = maxWith(function(a) {return Q(a)}, actions)[0];
+             return Delta({v: aMax});
+         } else if (aleph < Qmin) {
+             var aMin = minWith(function(a) {return Q(a)}, actions)[0];
+             return Delta({v: aMin});
+         } else {
+             var aHi = minWith(function(a) {return Q(a)>=aleph ? Q(a) :
+1e10}, actions)[0],
+                 aLo = maxWith(function(a) {return Q(a)<=aleph ? Q(a) :
+-1e10}, actions)[0],
+                 qHi = Q(aHi),
+                 qLo = Q(aLo),
+                 p = qHi > qLo ? (aleph - qLo) / (qHi - qLo) : 0.5;
+             return Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
+         }
+    });
+
+
+  var expectedUtility = dp.cache(function(state, action, aleph){
+    var u = utility(state, action);
+    if (state.terminateAfterAction){
+      return u;
+    } else {
+      return u + expectation(Infer({ model() {
+        var nextState = transition(state, action);
+        var nextAleph = propagate_aspiration(state, action, u, aleph,
+nextState);
+        var nextAction = sample(act(nextState, nextAleph));
+        return expectedUtility(nextState, nextAction, nextAleph);
+      }}));
+    }
+  });
+
+var propagate_aspiration = dp.cache(function(state, action, reward, aleph,
+nextState) {
+
+    // hard update
+    // var nextAleph = aleph - reward;
+    // TODO: rescaling code!
+
+    var q = aleph; // zwischen q lowerbound und q upper bound
+    var Qupperbound = reward + expectation(Infer({
+      model() {
+        var nextpossiblestate = transition(state, action);
+        var next_actions = stateToActions(nextpossiblestate);
+
+        var Qnext = function(a) {
+          return expectedUtility(nextpossiblestate, a, aleph - reward);
+        };
+        return maxWith(Qnext, next_actions)[1];
+      }
+    }));
+
+    var Qlowerbound = reward + expectation(Infer({
+      model() {
+        var nextpossiblestate = transition(state, action);
+        var next_actions = stateToActions(nextpossiblestate);
+
+        var Qnext = function(a) {
+          return expectedUtility(nextpossiblestate, a, aleph - reward);
+        };
+        return minWith(Qnext, next_actions)[1];
+      }
+    }));
+
+    var lam = (q - Qlowerbound) / (Qupperbound - Qlowerbound);
+
+    var actions_real_next_state = stateToActions(nextState);
+
+    var Qnext = function(a) {
+      return expectedUtility(nextState, a, aleph - reward);
+    };
+    var Qmaxnext = maxWith(Qnext, actions_real_next_state)[1];
+    var Qminnext = minWith(Qnext, actions_real_next_state)[1];
+
+    var nextAleph = Qminnext + lam * (Qmaxnext - Qminnext);
+
+    return nextAleph;
+  });
+
+  return { act, propagate_aspiration };
+};
+
+
+
+var agent = makeAgent();
+var act = agent.act;
+var propagate_aspiration = agent.propagate_aspiration;
+
+// Generate and draw a trajectory
+
+var simulate = function(state,aleph) {
+  var action = sample(act(state,aleph));
+  var reward = utility(state, action);
+  var nextState = transition(state, action);
+  var nextAleph = propagate_aspiration(state, action, reward, aleph,
+nextState);
+  var out = [state, action];
+  if (state.terminateAfterAction) {
+    return [out];
+  } else {
+    return [out].concat(simulate(nextState,nextAleph));
+  }
+};
+
+var aleph0 = 1.0;
+console.log("jetz")
+var trajectory = simulate(mdp.startState,aleph0);
+
+viz.gridworld(world, { trajectory: map(first, trajectory) })
