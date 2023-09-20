@@ -12,9 +12,9 @@ var tableToUtilityFunction = function(table, feature) {
     return stateFeatureName ? table[stateFeatureName] : table.timeCost;
   };
 };
-//
+// 
 
-// Construct world
+// Construct world 
 
 var grid = [
   ['#', '#', '#', '#',  V , '#'],
