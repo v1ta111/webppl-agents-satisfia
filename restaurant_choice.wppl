@@ -1,4 +1,3 @@
-
 // fold: Restaurant constants, tableToUtilityFunction
 
 var ___ = ' ';
@@ -51,124 +50,131 @@ var utilityTable = {
 
 var utility = tableToUtilityFunction(utilityTable, world.feature);
 
+
+// Auxiliary functions:
+
+var interpolate = function(x, lam, y) {
+  // this is denoted  x : lam : y  in formulas
+  return x + lam * (y - x);
+}
+var relativePosition = function(x, z, y) {
+  // this is denoted  x \ z \ y  in formulas
+  return (z - x) / (y - x);
+}
+var clip = function(x, z, y) {
+  // this is denoted  x[ z ]y  in formulas
+  return Math.min(Math.max(x, z), y);
+}
+
 // Construct agent
 
 var makeAgent = function() {
 
-     var act = dp.cache(function(state, aleph) {
-         var actions = stateToActions(state),
-             Q = function(action) {return expectedUtility(state, action,
-aleph);},
-             Qmax = maxWith(Q, actions)[1],
-             Qmin = minWith(Q, actions)[1];
-         if (aleph > Qmax) {
-             var aMax = maxWith(function(a) {return Q(a)}, actions)[0];
-             return Delta({v: aMax});
-         } else if (aleph < Qmin) {
-             var aMin = minWith(function(a) {return Q(a)}, actions)[0];
-             return Delta({v: aMin});
-         } else {
-             var aHi = minWith(function(a) {return Q(a)>=aleph ? Q(a) :
-1e10}, actions)[0],
-                 aLo = maxWith(function(a) {return Q(a)<=aleph ? Q(a) :
--1e10}, actions)[0],
-                 qHi = Q(aHi),
-                 qLo = Q(aLo),
-                 p = qHi > qLo ? (aleph - qLo) / (qHi - qLo) : 0.5;
-             return Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
-         }
-    });
-
+  var act = dp.cache(function(state, aleph){
+    // We can get aleph in expectation if it doesn't lie outside the feasible range.
+    // So the following value will be our actual target for the expected return:
+    var q = clip(minFeasibleV(state), aleph, maxFeasibleV(state));
+    // Now we find two actions, aHi and aLo, whose Q values are closest to q from above and below: 
+    var actions = stateToActions(state),
+        Q = function(a) { return expectedUtility(state, a, aleph); },
+        aHi = minWith(function(a) {return Q(a) >= q ? Q(a) : 1e10}, actions)[0],
+        aLo = maxWith(function(a) {return Q(a) <= q ? Q(a) : -1e10}, actions)[0],
+        qHi = Q(aHi),
+        qLo = Q(aLo);
+    // Our local policy that guarantees q in expectation is a suitable mixture of these two actions:
+    var p = qHi > qLo ? (aleph - qLo) / (qHi - qLo) : 0.5;
+    return Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
+    // TODO later: since there are often many actions a with Q(s,a)=q, 
+    // we should use some further criteria to select between them,
+    // e.g. the mixture that results in the smallest variance in return (as in Phine's code).
+  });
 
   var expectedUtility = dp.cache(function(state, action, aleph){
-    var u = utility(state, action);
+    var reward = utility(state, action);
     if (state.terminateAfterAction){
-      return u;
+      return reward;
     } else {
-      return u + expectation(Infer({ model() {
+      return reward + expectation(Infer({ model() {
         var nextState = transition(state, action);
-        var nextAleph = propagate_aspiration(state, action, u, aleph,
-nextState);
+        var nextAleph = propagateAspiration(state, aleph, action, reward, nextState);
         var nextAction = sample(act(nextState, nextAleph));
         return expectedUtility(nextState, nextAction, nextAleph);
       }}));
     }
   });
 
-var propagate_aspiration = dp.cache(function(state, action, reward, aleph,
-nextState) {
+  // Compute the upper and lower bounds for Q and V that can be achieved:
 
-    // hard update
-    // var nextAleph = aleph - reward;
-    // TODO: rescaling code!
+  // Compute the Q and V functions of the classical maximization problem:
+  var maxFeasibleQ = dp.cache(function(state, action){
+    var u = utility(state, action);
+    if (state.terminateAfterAction){
+      return u;
+    } else {
+      return u + expectation(Infer({ model() {
+        return maxFeasibleV(transition(state, action));
+      }}));
+    }
+  });
+  var maxFeasibleV = dp.cache(function(state){
+    return maxWith(function(a) { return maxFeasibleQ(state, a); }, stateToActions(state))[1];
+  });
 
-    var q = aleph; // zwischen q lowerbound und q upper bound
-    var Qupperbound = reward + expectation(Infer({
-      model() {
-        var nextpossiblestate = transition(state, action);
-        var next_actions = stateToActions(nextpossiblestate);
+  // Compute the Q and V functions of the corresponding minimization (!) problem:
+  var minFeasibleQ = dp.cache(function(state, action){
+    var u = utility(state, action);
+    if (state.terminateAfterAction){
+      return u;
+    } else {
+      return u + expectation(Infer({ model() {
+        return minFeasibleV(transition(state, action));
+      }}));
+    }
+  });
+  var minFeasibleV = dp.cache(function(state){
+    return minWith(function(a) { return minFeasibleQ(state, a); }, stateToActions(state))[1];
+  });
 
-        var Qnext = function(a) {
-          return expectedUtility(nextpossiblestate, a, aleph - reward);
-        };
-        return maxWith(Qnext, next_actions)[1];
-      }
-    }));
+  var propagateAspiration = dp.cache(function(state, aleph, action, reward, nextState) {
 
-    var Qlowerbound = reward + expectation(Infer({
-      model() {
-        var nextpossiblestate = transition(state, action);
-        var next_actions = stateToActions(nextpossiblestate);
+    // recover the target value that we used in act() to determine action:
+    var q = clip(minFeasibleV(state), aleph, maxFeasibleV(state));
 
-        var Qnext = function(a) {
-          return expectedUtility(nextpossiblestate, a, aleph - reward);
-        };
-        return minWith(Qnext, next_actions)[1];
-      }
-    }));
+    // compute the relative position of that target in the expectation that we had of 
+    //    reward plus next feasibility interval 
+    // before we knew which state we would land in:
+    var lam = relativePosition(minFeasibleQ(state, action), q, maxFeasibleQ(state, action)); 
 
-    var lam = (q - Qlowerbound) / (Qupperbound - Qlowerbound);
-
-    var actions_real_next_state = stateToActions(nextState);
-
-    var Qnext = function(a) {
-      return expectedUtility(nextState, a, aleph - reward);
-    };
-    var Qmaxnext = maxWith(Qnext, actions_real_next_state)[1];
-    var Qminnext = minWith(Qnext, actions_real_next_state)[1];
-
-    var nextAleph = Qminnext + lam * (Qmaxnext - Qminnext);
+    // rescale the target to the feasibility interval of the state that we landed in:
+    var nextAleph = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
 
     return nextAleph;
   });
 
-  return { act, propagate_aspiration };
+  return { act: act, propagateAspiration: propagateAspiration };
 };
-
-
 
 var agent = makeAgent();
 var act = agent.act;
-var propagate_aspiration = agent.propagate_aspiration;
+var propagate_aspiration = agent.propagateAspiration;
 
 // Generate and draw a trajectory
 
-var simulate = function(state,aleph) {
-  var action = sample(act(state,aleph));
+var simulate = function(state, aleph) {
+  var localPolicy = act(state, aleph);
+  var action = sample(localPolicy);
   var reward = utility(state, action);
   var nextState = transition(state, action);
-  var nextAleph = propagate_aspiration(state, action, reward, aleph,
-nextState);
+  var nextAleph = propagate_aspiration(state, aleph, action, reward, nextState);
   var out = [state, action];
   if (state.terminateAfterAction) {
     return [out];
   } else {
-    return [out].concat(simulate(nextState,nextAleph));
+    return [out].concat(simulate(nextState, nextAleph));
   }
 };
 
 var aleph0 = 1.0;
-console.log("jetz")
-var trajectory = simulate(mdp.startState,aleph0);
+var trajectory = simulate(mdp.startState, aleph0);
 
 viz.gridworld(world, { trajectory: map(first, trajectory) })
