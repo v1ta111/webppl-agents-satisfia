@@ -138,12 +138,12 @@ var makeAgent = function() {
   var propagateAspiration = dp.cache(function(state, aleph, action, reward, nextState) {
 
     // recover the target value that we used in act() to determine action:
-    var q = clip(minFeasibleV(state), aleph, maxFeasibleV(state));
+    // var q = clip(minFeasibleV(state), aleph, maxFeasibleV(state));
 
     // compute the relative position of that target in the expectation that we had of 
     //    reward plus next feasibility interval 
     // before we knew which state we would land in:
-    var lam = relativePosition(minFeasibleQ(state, action), q, maxFeasibleQ(state, action)); 
+    var lam = relativePosition(minFeasibleQ(state, action), aleph, maxFeasibleQ(state, action)); 
 
     // rescale the target to the feasibility interval of the state that we landed in:
     var nextAleph = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
@@ -160,19 +160,32 @@ var propagate_aspiration = agent.propagateAspiration;
 
 // Generate and draw a trajectory
 
+
 var simulate = function(state, aleph) {
   var localPolicy = act(state, aleph);
   var action = sample(localPolicy);
   var reward = utility(state, action);
   var nextState = transition(state, action);
   var nextAleph = propagate_aspiration(state, aleph, action, reward, nextState);
-  var out = [state, action];
+  var sa = [state, action];
   if (state.terminateAfterAction) {
-    return [out];
+    return { traj: [sa], return: reward };
   } else {
-    return [out].concat(simulate(nextState, nextAleph));
+    var nextOut = simulate(nextState, nextAleph);
+    return { traj: [sa].concat(nextOut.traj), return: reward + nextOut.return };
   }
 };
+
+var aleph0 = 1.0;
+var out = simulate(mdp.startState, aleph0);
+var trajectory = out.traj;
+console.log(out.return);
+console.log(trajectory);
+
+
+  
+
+viz.gridworld(world, { trajectory: map(first, trajectory) })
 
 var aleph0 = 1.0;
 var trajectory = simulate(mdp.startState, aleph0);
