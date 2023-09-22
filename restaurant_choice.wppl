@@ -1,3 +1,10 @@
+// set our target aspitation and safety bound lambdas:
+
+var aleph0 = 1.5, // desired expected return
+    maxLambda = 0.95, // upper bound on local relative aspiration in each step (must be minLambda...1)
+    minLambda = 0.05; // lower bound on local relative aspiration in each step (must be 0...maxLambda)
+
+
 // fold: Restaurant constants, tableToUtilityFunction
 
 var ___ = ' ';
@@ -99,7 +106,7 @@ var makeAgent = function(indicatorIncrement) {
     // var aHi = maxWith(function(a) {return Qstate(a) == qHi ? 1 : 0}, actions)[0],
     //    aLo = maxWith(function(a) {return Qstate(a) == qLo ? 1 : 0}, actions)[0];
     // Our local policy that guarantees q in expectation is a suitable mixture of these two actions:
-    var p = qHi > qLo ? (aleph - qLo) / (qHi - qLo) : 0.5,
+    var p = qHi > qLo ? (v - qLo) / (qHi - qLo) : 0.5,
         localPolicy = Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
     return localPolicy;
   });
@@ -109,7 +116,8 @@ var makeAgent = function(indicatorIncrement) {
   // Compute the upper and lower bounds for Q and V that can be achieved:
   // (TODO: generalize to use maxLambda, minLambda)
 
-  // Compute the Q and V functions of the classical maximization problem:
+  // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
+  // or of the LRA-based problem (if maxLambda<1):
   var maxFeasibleQ = dp.cache(function(state, action){
     var r = indicatorIncrement(state, action);
     if (state.terminateAfterAction){
@@ -119,10 +127,18 @@ var makeAgent = function(indicatorIncrement) {
     }
   });
   var maxFeasibleV = dp.cache(function(state){
-    return maxWith(function(a) { return maxFeasibleQ(state, a); }, stateToActions(state))[1];
+    var actions = stateToActions(state),
+        Qstate = function(a) { return maxFeasibleQ(state, a); };
+    if (maxLambda == 1) {
+      return maxWith(Qstate, actions)[1];
+    } else {
+      var v = interpolate(minWith(Qstate, actions)[1], maxLambda, maxWith(Qstate, actions)[1]);
+      return v;
+    }
   });
 
-  // Compute the Q and V functions of the corresponding minimization (!) problem:
+  // Compute the Q and V functions of the corresponding minimization (!) problem (if minLambda==0)
+  // or of the LRA-based problem (if minLambda>0):
   var minFeasibleQ = dp.cache(function(state, action){
     var r = indicatorIncrement(state, action);
     if (state.terminateAfterAction){
@@ -132,7 +148,14 @@ var makeAgent = function(indicatorIncrement) {
     }
   });
   var minFeasibleV = dp.cache(function(state){
-    return minWith(function(a) { return minFeasibleQ(state, a); }, stateToActions(state))[1];
+    var actions = stateToActions(state),
+        Qstate = function(a) { return minFeasibleQ(state, a); };
+    if (minLambda == 0) {
+      return minWith(Qstate, actions)[1];
+    } else {
+      var v = interpolate(minWith(Qstate, actions)[1], minLambda, maxWith(Qstate, actions)[1]);
+      return v;
+    }
   });
 
   // When using action in state, we can get any expected return in the interval
@@ -211,12 +234,6 @@ var simulate = function(state, aleph) {
     return { traj: [sa].concat(nextOut.traj), return: r + nextOut.return };
   }
 };
-
-
-// set our target aspitation:
-
-var aleph0 = 1.5;
-
 
 
 // calculate expected return and return std.dev. by using the inbuilt expectation function:
