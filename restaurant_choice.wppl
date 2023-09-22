@@ -58,6 +58,12 @@ var utilityTable = {
 var indicatorIncrement = tableToUtilityFunction(utilityTable, world.feature);
 
 
+
+var refPolicy = function(state) { 
+  return Categorical({ps: [0.7, 0.1, 0.1, 0.1], vs: ["u", "d", "l", "r"]}); 
+};
+
+
 // Auxiliary functions:
 
 var interpolate = function(x, lam, y) {
@@ -210,12 +216,37 @@ var makeAgent = function(indicatorIncrement) {
     return nextAleph;
   });
 
-  return { act: act, propagateAspiration: propagateAspiration };
+  // some more safety criteria:
+
+  var KLdiv = dp.cache(function(state, aleph) {
+    var localPolicy = act(state, aleph),
+        ref = refPolicy(state);
+    return expectation(Infer({ model() {
+      var action = sample(localPolicy),
+          d = localPolicy.score(action) - ref.score(action);
+      if (state.terminateAfterAction){
+        return d;
+      } else {
+        var nextState = transition(state, action),
+            nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
+        return d + KLdiv(nextState, nextAleph);
+      }
+    }}));
+  });
+
+  return { 
+    act: act, propagateAspiration: propagateAspiration, 
+    Q: Q, V: V, Q2: Q2, V2: V2, 
+    minFeasibleQ: minFeasibleQ, maxFeasibleQ: maxFeasibleQ, 
+    minFeasibleV: minFeasibleV, maxFeasibleV: maxFeasibleV,
+    KLdiv: KLdiv
+  };
 };
 
-var agent = makeAgent(indicatorIncrement);
-var act = agent.act;
-var propagate_aspiration = agent.propagateAspiration;
+var agent = makeAgent(indicatorIncrement), 
+    act = agent.act, propagate_aspiration = agent.propagateAspiration,
+    V = agent.V, V2 = agent.V2,
+    KLdiv = agent.KLdiv;
 
 // Generate and draw a trajectory
 
@@ -241,14 +272,15 @@ var simulate = function(state, aleph) {
 var expectedReturn = expectation(Infer({ model() {
   return simulate(mdp.startState, aleph0).return;
 }}));
-console.log("in expectation, we expected return", aleph0, "and actually get", expectedReturn);
+console.log("in expectation, we desired return", aleph0, "and actually get", expectedReturn);
 
 var expectedSquaredReturn = expectation(Infer({ model() {
   return Math.pow(simulate(mdp.startState, aleph0).return,2);
 }})),
 stddev = Math.sqrt(expectedSquaredReturn - Math.pow(expectedReturn,2));
-console.log("return had a std.dev. of", stddev);
+console.log("return has a std.dev. of", stddev, "which should equal", Math.sqrt(V2(mdp.startState, aleph0) - Math.pow(V(mdp.startState, aleph0),2)));
 
+console.log("KL divergence from reference policy is", KLdiv(mdp.startState, aleph0));
 
 // simulate a single trajectory:
 
