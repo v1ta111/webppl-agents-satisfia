@@ -59,7 +59,7 @@ var interpolate = function(x, lam, y) {
 }
 var relativePosition = function(x, z, y) {
   // this is denoted  x \ z \ y  in formulas
-  return (z - x) / (y - x);
+  return y != x ? (z - x) / (y - x) : 0.5;
 }
 var clip = function(x, z, y) {
   // this is denoted  x[ z ]y  in formulas
@@ -74,29 +74,40 @@ var makeAgent = function(indicatorIncrement) {
   // utility -> indicatorIncrement
 
   var act = dp.cache(function(state, aleph){
-    // We can get aleph in expectation if it doesn't lie outside the feasible range.
-    // So the following value will be our actual target for the expected return, 
-    // before having chosen action:
-    var v = clip(minFeasibleV(state), aleph, maxFeasibleV(state));
-    // Now we find two actions, aHi and aLo, whose Q values are closest to q from above and below: 
+    // Calculate expected return in state, given aspiration aleph:
+    var v = V(state, aleph);
+    // Now we find the two Q table entries, qHi and qLo, that are closest to v from above and below: 
     var actions = stateToActions(state),
         Qstate = function(a) { return Q(state, a, aleph); },
-        aHi = minWith(function(a) {return Qstate(a) >= v ? Qstate(a) : 1e10}, actions)[0],
-        aLo = maxWith(function(a) {return Qstate(a) <= v ? Qstate(a) : -1e10}, actions)[0],
-        qHi = Qstate(aHi),
-        qLo = Qstate(aLo);
+        qHi = minWith(function(a) {return Qstate(a) >= v ? Qstate(a) : 1e10}, actions)[1],
+        qLo = maxWith(function(a) {return Qstate(a) <= v ? Qstate(a) : -1e10}, actions)[1];
+    // From those a that meet these values, choose the ones that minimize the variance of return
+    // by minimizing the squared deviation from expected return (which equals v):
+    var squaredDevFromVHi = function(a) { 
+          var q2 = Q2(state, a, aleph),
+              variance = q2 - Math.pow(qHi,2);
+          return variance + Math.pow(qHi - v,2);
+        },
+        squaredDevFromVLo = function(a) {
+          var q2 = Q2(state, a, aleph),
+              variance = q2 - Math.pow(qLo,2);
+          return variance + Math.pow(qLo - v,2);
+        },
+        aHi = minWith(squaredDevFromVHi, filter(function(a) {return Qstate(a) == qHi}, actions))[0],
+        aLo = minWith(squaredDevFromVLo, filter(function(a) {return Qstate(a) == qLo}, actions))[0];
+    // Before, we simply chose two arbitrary actions that achieve these values:
+    // var aHi = maxWith(function(a) {return Qstate(a) == qHi ? 1 : 0}, actions)[0],
+    //    aLo = maxWith(function(a) {return Qstate(a) == qLo ? 1 : 0}, actions)[0];
     // Our local policy that guarantees q in expectation is a suitable mixture of these two actions:
     var p = qHi > qLo ? (aleph - qLo) / (qHi - qLo) : 0.5,
         localPolicy = Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
     return localPolicy;
-    // TODO later: since there are often many actions a with Q(s,a)=q, 
-    // we should use some further criteria to select between them,
-    // e.g. the mixture that results in the smallest variance in return (as in Phine's code).
   });
 
   // Note: we do no longer need the former function expectedUtility, so I removed it.
 
   // Compute the upper and lower bounds for Q and V that can be achieved:
+  // (TODO: generalize to use maxLambda, minLambda)
 
   // Compute the Q and V functions of the classical maximization problem:
   var maxFeasibleQ = dp.cache(function(state, action){
@@ -104,9 +115,7 @@ var makeAgent = function(indicatorIncrement) {
     if (state.terminateAfterAction){
       return r;
     } else {
-      return r + expectation(Infer({ model() {
-        return maxFeasibleV(transition(state, action));
-      }}));
+      return r + expectation(Infer({ model() { return maxFeasibleV(transition(state, action)); }}));
     }
   });
   var maxFeasibleV = dp.cache(function(state){
@@ -119,9 +128,7 @@ var makeAgent = function(indicatorIncrement) {
     if (state.terminateAfterAction){
       return r;
     } else {
-      return r + expectation(Infer({ model() {
-        return minFeasibleV(transition(state, action));
-      }}));
+      return r + expectation(Infer({ model() { return minFeasibleV(transition(state, action)); }}));
     }
   });
   var minFeasibleV = dp.cache(function(state){
@@ -136,18 +143,43 @@ var makeAgent = function(indicatorIncrement) {
   var Q = dp.cache(function(state, action, aleph) {
     return clip(minFeasibleQ(state, action), aleph, maxFeasibleQ(state, action));
   });
-  // Note: after I have written the comment above this function, Codepilot has written the actual code for it!
+  // When in state, we can get any expected return in the interval
+  // [minFeasibleV(state), maxFeasibleV(state)].
+  // So when having aspiration aleph, we can still fulfill it in expectation if it lies in the interval.
+  // Therefore, when in state at aspiration aleph, we expect to get an expected return
+  // that equals aleph clipped to that interval:
+  var V = dp.cache(function(state, aleph) {
+    return clip(minFeasibleV(state), aleph, maxFeasibleV(state));
+  });
 
-  var propagateAspiration = dp.cache(function(state, aleph, action, reward, nextState) {
+  // Expected squared return, for computing the variance of return:
+  var Q2 = dp.cache(function(state, action, aleph) {
+    return expectation(Infer({ model() {
+      var r = indicatorIncrement(state, action);
+      if (state.terminateAfterAction){
+        return Math.pow(r,2);
+      } else {
+        var nextState = transition(state, action),
+            nextAleph = propagateAspiration(state, aleph, action, r, nextState);
+        return Math.pow(r,2) + 2*r*V(nextState, nextAleph) + V2(nextState, nextAleph);
+      }
+    }}));
+  });
+  var V2 = dp.cache(function(state, aleph) {
+    return expectation(Infer({ model() { return Q2(state, sample(act(state, aleph)), aleph); }}));
+  });
+
+  var propagateAspiration = dp.cache(function(state, aleph, action, r, nextState) {
 
     // recover the adjusted target value that we had after choosing action:
     // (Note: We have E(q | action ~ localPolicy) = v) by construction of localPolicy in act().)
     var q = Q(state, action, aleph);
 
     // compute the relative position of that target in the expectation that we had of 
-    //    reward plus next feasibility interval 
+    //    r plus next feasibility interval 
     // before we knew which state we would land in:
     var lam = relativePosition(minFeasibleQ(state, action), q, maxFeasibleQ(state, action)); 
+    // (this is between 0 and 1 by definition of q and Q.)
 
     // rescale the target to the feasibility interval of the state that we landed in:
     var nextAleph = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
@@ -186,19 +218,24 @@ var simulate = function(state, aleph) {
 var aleph0 = 1.5;
 
 
-// simulate a single trajectory:
 
-var out = simulate(mdp.startState, aleph0);
-var trajectory = out.traj;
-console.log(out.return);
-console.log(trajectory);
-
-viz.gridworld(world, { trajectory: map(first, trajectory) })
-
-
-// calculate expected return by using the inbuilt expectation function:
+// calculate expected return and return std.dev. by using the inbuilt expectation function:
 
 var expectedReturn = expectation(Infer({ model() {
   return simulate(mdp.startState, aleph0).return;
 }}));
 console.log("in expectation, we expected return", aleph0, "and actually get", expectedReturn);
+
+var expectedSquaredReturn = expectation(Infer({ model() {
+  return Math.pow(simulate(mdp.startState, aleph0).return,2);
+}})),
+stddev = Math.sqrt(expectedSquaredReturn - Math.pow(expectedReturn,2));
+console.log("return had a std.dev. of", stddev);
+
+
+// simulate a single trajectory:
+
+var out = simulate(mdp.startState, aleph0);
+var trajectory = out.traj;
+viz.gridworld(world, { trajectory: map(first, trajectory) })
+
