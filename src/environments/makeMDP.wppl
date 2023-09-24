@@ -1,0 +1,36 @@
+// TODO: make a general MDP from an efficient specification of states, actions, and transitions
+
+// Q: can one still act in a terminal state?
+
+var exampleSpec = {
+    "s0": { // a non-terminal state
+        "a00": [0, { "s1": 0.3, "s2": 0.7 }], // indicatorIncrement, transition probabilities
+        "a01": [0, { "s1": 0.5, "s2": 0.5 }]
+    },
+    // terminal states:
+    "s1": { "a10": 1, "a11": 2 }, // indicatorIncrement
+    "s2": { "a20": 3, "a21": 4 }
+};
+
+var makeMDP = function(spec) {
+    var states = Object.keys(spec);
+    var stateToActions = function(state) {
+        return Object.keys(spec[state]);
+    }
+    var transition = function(state, action) {
+        var t = spec[state][action][1];
+        return Categorical({vs: Object.keys(t), ps: Object.values(t)});
+    };
+    var terminateAfterAction = function(state) {
+        return !_.isArray(Object.values(spec[state])[0]);
+    }; 
+    var feature = function(state) {
+        return { name: state };
+    };
+    var indicatorIncrement = function(state, action) {
+        var t = spec[state][action];
+        return _.isArray(t) ? t[0] : t;
+    };
+    var world = { states, stateToActions, transition, terminateAfterAction, feature, indicatorIncrement };
+    return { world };
+}
