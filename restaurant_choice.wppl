@@ -91,7 +91,7 @@ var makeAgent = function(indicatorIncrement) {
     var v = V(state, aleph);
     // Now we find the two Q table entries, qHi and qLo, that are closest to v from above and below: 
     var actions = stateToActions(state),
-        Qstate = function(a) { return Q(state, a, aleph); },
+        Qstate = function(a) { return Q(state, a, v); },
         qHi = minWith(function(a) {return Qstate(a) >= v ? Qstate(a) : 1e10}, actions)[1],
         qLo = maxWith(function(a) {return Qstate(a) <= v ? Qstate(a) : -1e10}, actions)[1];
     // From those a that meet these values, choose the ones that minimize the variance of return
