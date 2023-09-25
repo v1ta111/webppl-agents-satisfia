@@ -45,7 +45,7 @@ var transition = world.transition;
 var stateToActions = world.stateToActions;
 
 
-// Construct utility function
+// Construct indicator increment function
 
 var indicatorIncrementTable = {
   'Donut S': 1,
