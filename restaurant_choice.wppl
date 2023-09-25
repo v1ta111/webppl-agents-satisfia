@@ -45,7 +45,8 @@ var transition = world.transition;
 var stateToActions = world.stateToActions;
 
 
-// Construct indicator increment function
+// Construct indicator increment function 
+// (Note: under a "maximization" paradigm, this would be called "reward" or "utility")
 
 var indicatorIncrementTable = {
   'Donut S': 1,
