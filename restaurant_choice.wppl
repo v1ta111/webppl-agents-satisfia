@@ -59,7 +59,7 @@ var indicatorIncrementTable = {
 var indicatorIncrement = tableToIndicatorIncrementFct(indicatorIncrementTable, world.feature);
 
 
-// Reference policy:
+// Reference policy for use in KL divergence:
 
 var refPolicy = function(state) { 
   return Categorical({ps: [0.7, 0.1, 0.1, 0.1], vs: ["u", "d", "l", "r"]}); 
