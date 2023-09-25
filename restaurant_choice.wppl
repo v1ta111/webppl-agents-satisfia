@@ -1,19 +1,19 @@
 // set our target aspitation and safety bound lambdas:
 
-var aleph0 = 1.5, // desired expected return
+var aleph0 = 1.5, // initial global aspiration (desired expected return)
     maxLambda = 0.95, // upper bound on local relative aspiration in each step (must be minLambda...1)
-    minLambda = 0.05; // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-
+    minLambda = 0.05, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
+    debug = false;
 
 // fold: Restaurant constants, tableToUtilityFunction
 
 var ___ = ' ';
 var DN = { name : 'Donut N' };
 var DS = { name : 'Donut S' };
-var V = { name : 'Veg' };
+var getAspiration4state = { name : 'Veg' };
 var N = { name : 'Noodle' };
 
-var tableToUtilityFunction = function(table, feature) {
+var tableToIndicatorIncrementFct = function(table, feature) {
   return function(state, action) {
     var stateFeatureName = feature(state).name;
     return stateFeatureName ? table[stateFeatureName] : table.timeCost;
@@ -24,7 +24,7 @@ var tableToUtilityFunction = function(table, feature) {
 // Construct world 
 
 var grid = [
-  ['#', '#', '#', '#',  V , '#'],
+  ['#', '#', '#', '#',  getAspiration4state , '#'],
   ['#', '#', '#', ___, ___, ___],
   ['#', '#', DN , ___, '#', ___],
   ['#', '#', '#', ___, '#', ___],
@@ -47,7 +47,7 @@ var stateToActions = world.stateToActions;
 
 // Construct utility function
 
-var utilityTable = {
+var indicatorIncrementTable = {
   'Donut S': 1,
   'Donut N': 1,
   'Veg': 3,
@@ -55,9 +55,10 @@ var utilityTable = {
   'timeCost': -0.1
 };
 
-var indicatorIncrement = tableToUtilityFunction(utilityTable, world.feature);
+var indicatorIncrement = tableToIndicatorIncrementFct(indicatorIncrementTable, world.feature);
 
 
+// Reference policy:
 
 var refPolicy = function(state) { 
   return Categorical({ps: [0.7, 0.1, 0.1, 0.1], vs: ["u", "d", "l", "r"]}); 
@@ -76,22 +77,22 @@ var relativePosition = function(x, z, y) {
 }
 var clip = function(x, z, y) {
   // this is denoted  x[ z ]y  in formulas
+
   return Math.min(Math.max(x, z), y);
 }
 
 // Construct agent
 
 var makeAgent = function(indicatorIncrement) {
-  // Note: I renamed some things so that they no longer sound as if larger is better:
-  // reward -> r
-  // utility -> indicatorIncrement
 
-  var act = dp.cache(function(state, aleph){
-    // Calculate expected return in state, given aspiration aleph:
-    var v = V(state, aleph);
+  var getLocalPolicy = dp.cache(function(state, aleph){
+    if (debug) console.log("getLocalPolicy", state.loc, aleph);
+    // Use aspiration aleph to set the desired expected return for this state before (!) having chosen an action:
+    var v = getAspiration4state(state, aleph);
+    if (debug) console.log("getLocalPolicy B");
     // Now we find the two Q table entries, qHi and qLo, that are closest to v from above and below: 
     var actions = stateToActions(state),
-        Qstate = function(a) { return Q(state, a, v); },
+        Qstate = function(a) { return getAspiration4action(state, a, v); },
         qHi = minWith(function(a) {return Qstate(a) >= v ? Qstate(a) : 1e10}, actions)[1],
         qLo = maxWith(function(a) {return Qstate(a) <= v ? Qstate(a) : -1e10}, actions)[1];
     // From those a that meet these values, choose the ones that minimize the variance of return
@@ -108,16 +109,11 @@ var makeAgent = function(indicatorIncrement) {
         },
         aHi = minWith(squaredDevFromVHi, filter(function(a) {return Qstate(a) == qHi}, actions))[0],
         aLo = minWith(squaredDevFromVLo, filter(function(a) {return Qstate(a) == qLo}, actions))[0];
-    // Before, we simply chose two arbitrary actions that achieve these values:
-    // var aHi = maxWith(function(a) {return Qstate(a) == qHi ? 1 : 0}, actions)[0],
-    //    aLo = maxWith(function(a) {return Qstate(a) == qLo ? 1 : 0}, actions)[0];
     // Our local policy that guarantees q in expectation is a suitable mixture of these two actions:
     var p = qHi > qLo ? (v - qLo) / (qHi - qLo) : 0.5,
         localPolicy = Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
     return localPolicy;
   });
-
-  // Note: we do no longer need the former function expectedUtility, so I removed it.
 
   // Compute the upper and lower bounds for Q and V that can be achieved:
   // (TODO: generalize to use maxLambda, minLambda)
@@ -125,6 +121,7 @@ var makeAgent = function(indicatorIncrement) {
   // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
   // or of the LRA-based problem (if maxLambda<1):
   var maxFeasibleQ = dp.cache(function(state, action){
+    if (debug) console.log("maxFeasibleQ", state.loc, action);
     var r = indicatorIncrement(state, action);
     if (state.terminateAfterAction){
       return r;
@@ -133,6 +130,7 @@ var makeAgent = function(indicatorIncrement) {
     }
   });
   var maxFeasibleV = dp.cache(function(state){
+    if (debug) console.log("maxFeasibleV", state.loc);
     var actions = stateToActions(state),
         Qstate = function(a) { return maxFeasibleQ(state, a); };
     if (maxLambda == 1) {
@@ -146,6 +144,7 @@ var makeAgent = function(indicatorIncrement) {
   // Compute the Q and V functions of the corresponding minimization (!) problem (if minLambda==0)
   // or of the LRA-based problem (if minLambda>0):
   var minFeasibleQ = dp.cache(function(state, action){
+    if (debug) console.log("minFeasibleQ", state.loc, action);
     var r = indicatorIncrement(state, action);
     if (state.terminateAfterAction){
       return r;
@@ -154,6 +153,7 @@ var makeAgent = function(indicatorIncrement) {
     }
   });
   var minFeasibleV = dp.cache(function(state){
+    if (debug) console.log("minFeasibleV", state.loc);
     var actions = stateToActions(state),
         Qstate = function(a) { return minFeasibleQ(state, a); };
     if (minLambda == 0) {
@@ -167,22 +167,25 @@ var makeAgent = function(indicatorIncrement) {
   // When using action in state, we can get any expected return in the interval
   // [minFeasibleQ(state, action), maxFeasibleQ(state, action)].
   // So when having aspiration aleph, we can still fulfill it in expectation if it lies in the interval.
-  // Therefore, when using action in state at aspiration aleph, we expect to get an expected return
-  // that equals aleph clipped to that interval:
-  var Q = dp.cache(function(state, action, aleph) {
-    return clip(minFeasibleQ(state, action), aleph, maxFeasibleQ(state, action));
+  // Therefore, when using action in state at aspiration aleph, 
+  // we set our aspiration when choosing this action to aleph clipped to that interval:
+  var getAspiration4action = dp.cache(function(state, action, aleph4state){
+    if (debug) console.log("getAspiration4action", state.loc, action, aleph4state)
+    return clip(minFeasibleQ(state, action), aleph4state, maxFeasibleQ(state, action));
   });
   // When in state, we can get any expected return in the interval
   // [minFeasibleV(state), maxFeasibleV(state)].
   // So when having aspiration aleph, we can still fulfill it in expectation if it lies in the interval.
-  // Therefore, when in state at aspiration aleph, we expect to get an expected return
-  // that equals aleph clipped to that interval:
-  var V = dp.cache(function(state, aleph) {
-    return clip(minFeasibleV(state), aleph, maxFeasibleV(state));
+  // Therefore, when in state at incoming aspiration aleph, 
+  // we adjust our aspiration to aleph clipped to that interval:
+  var getAspiration4state = dp.cache(function(state, propagatedAleph){
+    if (debug) console.log("getAspiration4state", state, propagatedAleph);
+    return clip(minFeasibleV(state), propagatedAleph, maxFeasibleV(state));
   });
 
   // Expected squared return, for computing the variance of return:
-  var Q2 = dp.cache(function(state, action, aleph) {
+  var Q2 = dp.cache(function(state, action, aleph){
+    if (debug) console.log("Q2", state.loc, action, aleph);
     return expectation(Infer({ model() {
       var r = indicatorIncrement(state, action);
       if (state.terminateAfterAction){
@@ -190,19 +193,21 @@ var makeAgent = function(indicatorIncrement) {
       } else {
         var nextState = transition(state, action),
             nextAleph = propagateAspiration(state, aleph, action, r, nextState);
-        return Math.pow(r,2) + 2*r*V(nextState, nextAleph) + V2(nextState, nextAleph);
+        return Math.pow(r,2) + 2*r*getAspiration4state(nextState, nextAleph) + V2(nextState, nextAleph);
       }
     }}));
   });
-  var V2 = dp.cache(function(state, aleph) {
-    return expectation(Infer({ model() { return Q2(state, sample(act(state, aleph)), aleph); }}));
+  var V2 = dp.cache(function(state, aleph){
+    if (debug) console.log("V2", state.loc, aleph);
+    return expectation(Infer({ model() { return Q2(state, sample(getLocalPolicy(state, aleph)), aleph); }}));
   });
 
-  var propagateAspiration = dp.cache(function(state, aleph, action, r, nextState) {
+  var propagateAspiration = dp.cache(function(state, aleph4state, action, r, nextState){
+    if (debug) console.log("propagateAspiration", state.loc, aleph4state, action, r, nextState.loc);
 
-    // recover the adjusted target value that we had after choosing action:
-    // (Note: We have E(q | action ~ localPolicy) = v) by construction of localPolicy in act().)
-    var q = Q(state, action, aleph);
+    // recover the aspiration that we had after choosing action, before knowing which state we would land in:
+    // (Note: We have E(q | action ~ localPolicy) = v) by construction of localPolicy in getLocaPolicy().)
+    var q = getAspiration4action(state, action, aleph4state);
 
     // compute the relative position of that target in the expectation that we had of 
     //    r plus next feasibility interval 
@@ -211,15 +216,15 @@ var makeAgent = function(indicatorIncrement) {
     // (this is between 0 and 1 by definition of q and Q.)
 
     // rescale the target to the feasibility interval of the state that we landed in:
-    var nextAleph = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
+    var aleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
 
-    return nextAleph;
+    return aleph4nextState;
   });
 
   // some more safety criteria:
 
   var KLdiv = dp.cache(function(state, aleph) {
-    var localPolicy = act(state, aleph),
+    var localPolicy = getLocalPolicy(state, aleph),
         ref = refPolicy(state);
     return expectation(Infer({ model() {
       var action = sample(localPolicy),
@@ -235,8 +240,9 @@ var makeAgent = function(indicatorIncrement) {
   });
 
   return { 
-    act: act, propagateAspiration: propagateAspiration, 
-    Q: Q, V: V, Q2: Q2, V2: V2, 
+    getLocalPolicy: getLocalPolicy, propagateAspiration: propagateAspiration, 
+    getAspiration4action: getAspiration4action, getAspiration4state: getAspiration4state, 
+    Q2: Q2, V2: V2, 
     minFeasibleQ: minFeasibleQ, maxFeasibleQ: maxFeasibleQ, 
     minFeasibleV: minFeasibleV, maxFeasibleV: maxFeasibleV,
     KLdiv: KLdiv
@@ -244,19 +250,20 @@ var makeAgent = function(indicatorIncrement) {
 };
 
 var agent = makeAgent(indicatorIncrement), 
-    act = agent.act, propagate_aspiration = agent.propagateAspiration,
-    V = agent.V, V2 = agent.V2,
+    getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagateAspiration,
+    getAspiration4state = agent.getAspiration4state, V2 = agent.V2,
     KLdiv = agent.KLdiv;
 
 // Generate and draw a trajectory
 
 
 var simulate = function(state, aleph) {
-  var localPolicy = act(state, aleph);
+  if (debug) console.log("simulate", state, aleph);
+  var localPolicy = getLocalPolicy(state, aleph);
   var action = sample(localPolicy);
   var r = indicatorIncrement(state, action);
   var nextState = transition(state, action);
-  var nextAleph = propagate_aspiration(state, aleph, action, r, nextState);
+  var nextAleph = propagateAspiration(state, aleph, action, r, nextState);
   var sa = [state, action];
   if (state.terminateAfterAction) {
     return { traj: [sa], return: r };
@@ -278,7 +285,8 @@ var expectedSquaredReturn = expectation(Infer({ model() {
   return Math.pow(simulate(mdp.startState, aleph0).return,2);
 }})),
 stddev = Math.sqrt(expectedSquaredReturn - Math.pow(expectedReturn,2));
-console.log("return has a std.dev. of", stddev, "which should equal", Math.sqrt(V2(mdp.startState, aleph0) - Math.pow(V(mdp.startState, aleph0),2)));
+console.log("return has a std.dev. of", stddev, 
+            "which should equal", Math.sqrt(V2(mdp.startState, aleph0) - Math.pow(getAspiration4state(mdp.startState, aleph0),2)));
 
 console.log("KL divergence from reference policy is", KLdiv(mdp.startState, aleph0));
 
