@@ -10,7 +10,7 @@ var aleph0 = 1.5, // initial global aspiration (desired expected return)
 var ___ = ' ';
 var DN = { name : 'Donut N' };
 var DS = { name : 'Donut S' };
-var getAspiration4state = { name : 'Veg' };
+var V = { name : 'Veg' };
 var N = { name : 'Noodle' };
 
 var tableToIndicatorIncrementFct = function(table, feature) {
@@ -24,7 +24,7 @@ var tableToIndicatorIncrementFct = function(table, feature) {
 // Construct world 
 
 var grid = [
-  ['#', '#', '#', '#',  getAspiration4state , '#'],
+  ['#', '#', '#', '#',  V , '#'],
   ['#', '#', '#', ___, ___, ___],
   ['#', '#', DN , ___, '#', ___],
   ['#', '#', '#', ___, '#', ___],
@@ -90,7 +90,6 @@ var makeAgent = function(indicatorIncrement) {
     if (debug) console.log("getLocalPolicy", state.loc, aleph);
     // Use aspiration aleph to set the desired expected return for this state before (!) having chosen an action:
     var v = getAspiration4state(state, aleph);
-    if (debug) console.log("getLocalPolicy B");
     // Now we find the two Q table entries, qHi and qLo, that are closest to v from above and below: 
     var actions = stateToActions(state),
         Qstate = function(a) { return getAspiration4action(state, a, v); },
