@@ -6,7 +6,7 @@ var aleph0 = [1.2,1.5], // initial global aspiration (desired expected return)
     lossCoeff4variance = 3.0,
     lossCoeff4KLdiv = 2.0,
     lossCoeff4random = 1.0,
-    onlyUseClosestActions = true,
+    onlyUseClosestActions = false,
     softmaxInvTemp = 1.0,
     debug = false;
 
@@ -160,16 +160,16 @@ var makeAgent = function(indicatorIncrement) {
       var actionsHi = filter(function(a) {return QstateMid(a) >= vMid}, actions),
           actionsLo = filter(function(a) {return QstateMid(a) <= vMid}, actions);
       // Calculate an approximate relative mixture coefficient p for upper group, to be used for approximating KLdiv:
-      var approxQHi = Math.mean(map(QstateMid, actionsHi)),
-          approxQLo = Math.mean(map(QstateMid, actionsLo)),
-          approxP = approxQHi > approxQLo ? (vMid - approxQLo) / (approxQHi - approxQLo) : 0.5;
+      var approxQHi = expectation(Infer({ model() { return QstateMid(uniformDraw(actionsHi)); }})),
+          approxQLo = expectation(Infer({ model() { return QstateMid(uniformDraw(actionsLo)); }})),
+          approxP = clip(1e-10, approxQHi > approxQLo ? (vMid - approxQLo) / (approxQHi - approxQLo) : 0.5, 1-1e-10);
       // Calculate loss for each action:          
       var lossHi = function(a) { 
-            var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(qHi,2);
+            var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(approxQHi,2);
             return lossCoeff4variance * (variance + Math.pow(approxQHi - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, approxP, a, aleph) + lossCoeff4random * Math.random();
           },
           lossLo = function(a) {
-            var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(qLo,2);
+            var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(approxQLo,2);
             return lossCoeff4variance * (variance + Math.pow(approxQLo - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, 1-approxP, a, aleph) + lossCoeff4random * Math.random();
           };
       // Construct distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo that are proportional to exp(-beta*lossHi) and exp(-beta*lossLo):
@@ -186,9 +186,9 @@ var makeAgent = function(indicatorIncrement) {
       // Calculate the true qHi, qLo, and p from these distributions:
       var qHi = expectation(localPolicyHi, QstateMid),
           qLo = expectation(localPolicyLo, QstateMid),
-          p = qHi > qLo ? (vMid - qLo) / (qHi - qLo) : 0.5;
+          p = clip(1e-10, qHi > qLo ? (vMid - qLo) / (qHi - qLo) : 0.5, 1-1e-10);
       // Finally, mix the two local policies with the true p:
-      return Mixture({ps: [p, 1-p], vs: [localPolicyHi, localPolicyLo]});
+      return Mixture({ps: [p, 1-p], dists: [localPolicyHi, localPolicyLo]});
     }
   });
 
@@ -330,31 +330,39 @@ var makeAgent = function(indicatorIncrement) {
 
   var KLdiv = dp.cache(function(state, aleph) {
     var localPolicy = getLocalPolicy(state, aleph),
-        ref = refPolicy(state);
-    return expectation(Infer({ model() {
-      var action = sample(localPolicy),
-          d = localPolicy.score(action) - ref.score(action);
-      if (state.terminateAfterAction){
-        return d;
-      } else {
-        var nextState = transition(state, action),
-            nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
-        return d + KLdiv(nextState, nextAleph);
-      }
-    }}));
+        ref = refPolicy(state),
+        res = expectation(Infer({ model() {
+          var action = sample(localPolicy),
+              d = localPolicy.score(action) - ref.score(action);
+          if (state.terminateAfterAction){
+            return d;
+          } else {
+            var nextState = transition(state, action),
+                nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
+            return d + KLdiv(nextState, nextAleph);
+          }
+        }}));
+    if (res == -Infinity) {
+      console.log("   KLdiv", state.loc, aleph, res);
+    }
+    return res;
   });
   var KLdivAction = dp.cache(function(state, p, action, aleph) {
-    var ref = refPolicy(state);
-    return expectation(Infer({ model() {
-      var d = Math.log(p) - ref.score(action);
-      if (state.terminateAfterAction){
-        return d;
-      } else {
-        var nextState = transition(state, action),
-            nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
-        return d + KLdiv(nextState, nextAleph);
-      }
-    }}));
+    var ref = refPolicy(state),
+        res = expectation(Infer({ model() {
+          var d = Math.log(p) - ref.score(action);
+          if (state.terminateAfterAction){
+            return d;
+          } else {
+            var nextState = transition(state, action),
+                nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
+            return d + KLdiv(nextState, nextAleph);
+          }
+        }}));
+    if (res == -Infinity) {
+      console.log("   KLdivAction", state.loc, p, action, aleph, res);
+    }
+    return res;
   });
 
   return { 
