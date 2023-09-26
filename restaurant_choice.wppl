@@ -1,14 +1,14 @@
 // set our target aspitation and safety bound lambdas:
 
-var aleph0 = [1.2,1.5], // initial global aspiration (desired expected return)
+var aleph0 = [0,2], // initial global aspiration (desired expected return)
     maxLambda = 0.95, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda = 0.05, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-    lossCoeff4variance = 3.0,
-    lossCoeff4KLdiv = 2.0,
-    lossCoeff4random = 1.0,
-    onlyUseClosestActions = false,
-    softmaxInvTemp = 1.0,
-    debug = false;
+    lossCoeff4variance = 1.0, // weight of variance in loss function, must be >= 0
+    lossCoeff4KLdiv = 2.0, // weight of KL divergence in loss function, must be >= 0
+    lossCoeff4random = 1.0, // weight of random noise in loss function, must be >= 0
+    onlyUseClosestActions = false, // if true, only use the two actions that are closest to the target aspiration in expectation
+    softmaxInvTemp = 1.0, // inverse temperature of softmax mixture of actions, must be > 0
+    debug = false; // if true, print debug messages
 
 // fold: Restaurant constants, tableToUtilityFunction
 
