@@ -159,20 +159,36 @@ var makeAgent = function(indicatorIncrement) {
       // First devide actions into those that are above and below vMid:
       var actionsHi = filter(function(a) {return QstateMid(a) >= vMid}, actions),
           actionsLo = filter(function(a) {return QstateMid(a) <= vMid}, actions);
-      // calculate an approximate relative mixture coefficient p for upper group, to be used for approximating KLdiv:
+      // Calculate an approximate relative mixture coefficient p for upper group, to be used for approximating KLdiv:
       var approxQHi = Math.mean(map(QstateMid, actionsHi)),
           approxQLo = Math.mean(map(QstateMid, actionsLo)),
           approxP = approxQHi > approxQLo ? (vMid - approxQLo) / (approxQHi - approxQLo) : 0.5;
-      // calculate loss for each action:          
+      // Calculate loss for each action:          
       var lossHi = function(a) { 
             var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(qHi,2);
-            return lossCoeff4variance * (variance + Math.pow(qHi - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, approxP, a, aleph) + lossCoeff4random * Math.random();
+            return lossCoeff4variance * (variance + Math.pow(approxQHi - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, approxP, a, aleph) + lossCoeff4random * Math.random();
           },
           lossLo = function(a) {
             var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(qLo,2);
-            return lossCoeff4variance * (variance + Math.pow(qLo - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, 1-approxP, a, aleph) + lossCoeff4random * Math.random();
+            return lossCoeff4variance * (variance + Math.pow(approxQLo - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, 1-approxP, a, aleph) + lossCoeff4random * Math.random();
           };
-      // TODO: construct distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo that are proportional to exp(-beta*lossHi) and exp(-beta*lossLo). Then calculate the true qHi, qLo, and p from these distributions. Finally, mix the two local policies with the true p.
+      // Construct distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo that are proportional to exp(-beta*lossHi) and exp(-beta*lossLo):
+      var localPolicyHi = Infer({ model() {
+            var a = uniformDraw(actionsHi);
+            factor(-softmaxInvTemp * lossHi(a));
+            return a;
+          }}),
+          localPolicyLo = Infer({ model() {
+            var a = uniformDraw(actionsLo);
+            factor(-softmaxInvTemp * lossLo(a));
+            return a;
+          }});          
+      // Calculate the true qHi, qLo, and p from these distributions:
+      var qHi = expectation(localPolicyHi, QstateMid),
+          qLo = expectation(localPolicyLo, QstateMid),
+          p = qHi > qLo ? (vMid - qLo) / (qHi - qLo) : 0.5;
+      // Finally, mix the two local policies with the true p:
+      return Mixture({ps: [p, 1-p], vs: [localPolicyHi, localPolicyLo]});
     }
   });
 
