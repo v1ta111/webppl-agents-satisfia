@@ -3,8 +3,9 @@
 var aleph0 = [1.2,1.5], // initial global aspiration (desired expected return)
     maxLambda = 0.95, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda = 0.05, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-    minimizeVariance = false,
-    minimizeKLdiv = false,
+    lossCoeff4variance = 3.0,
+    lossCoeff4KLdiv = 2.0,
+    lossCoeff4random = 1.0,
     debug = false;
 
 // fold: Restaurant constants, tableToUtilityFunction
@@ -134,22 +135,18 @@ var makeAgent = function(indicatorIncrement) {
     var p = qHi > qLo ? (vMid - qLo) / (qHi - qLo) : 0.5;
     if (debug) console.log("  qHi, qLo, actionsHi, actionsLo, p", qHi, qLo, actionsHi, actionsLo, p);
 
-    // From those actions that meet these values, choose a pair that optimizes an additional safety criterion:
-    // - the squared deviation from expected return (if minimizeVariance==true)
-    // - the KL divergence from the reference policy (if minimizeKLdiv==true)
-    // or a random pair (if both are false):
-    var lossHi = minimizeVariance ? function(a) { 
+    // From those actions that meet these values, choose a pair that optimizes an additional safety criterion composed of
+    // - the squared deviation from expected return
+    // - the KL divergence from the reference policy
+    // - random noise:
+    var lossHi = function(a) { 
           var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(qHi,2);
-          return variance + Math.pow(qHi - vMid,2);
-        } : minimizeKLdiv ? function(a) {
-          return KLdivAction(state, p, a, aleph);
-        } : function(a) { return Math.random(); },
-        lossLo = minimizeVariance ? function(a) {
+          return lossCoeff4variance * (variance + Math.pow(qHi - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, p, a, aleph) + lossCoeff4random * Math.random();
+        },
+        lossLo = function(a) {
           var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(qLo,2);
-          return variance + Math.pow(qLo - vMid,2);
-        } : minimizeKLdiv ? function(a) {
-          return KLdivAction(state, 1-p, a, aleph);
-        } : function(a) { return Math.random(); },
+          return lossCoeff4variance * (variance + Math.pow(qLo - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, 1-p, a, aleph) + lossCoeff4random * Math.random();
+        },
         aHi = minWith(lossHi, actionsHi)[0],
         aLo = minWith(lossLo, actionsLo)[0];
     return Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
