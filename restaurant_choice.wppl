@@ -396,5 +396,5 @@ console.log("KL divergence from reference policy is", KLdiv(mdp.startState, alep
 
 var out = simulate(mdp.startState, aleph0);
 var trajectory = out.traj;
-viz.gridworld(world, { trajectory: map(first, trajectory) })
+// viz.gridworld(world, { trajectory: map(first, trajectory) })
 
