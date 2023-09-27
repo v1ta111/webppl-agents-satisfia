@@ -1,5 +1,4 @@
-// in Browser, uncomment the following line:
-// var argv = {};
+var _argv = typeof(argv) === 'undefined' ? {} : argv;
 
 // agent parameters:
 var params = extend({
@@ -12,14 +11,14 @@ var params = extend({
     onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
     softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
     rescalingDegree: 1.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
-  }, argv);
+  }, _argv);
 
 // simulation options:
 var options = extend({
       aleph0: [1.2,1.4], // initial global aspiration (desired expected return);
       debug: false, // if true, print debug messages
-    }, argv),
-    aleph0 = options.aleph0;
+    }, _argv),
+    aleph0 = typeof(options.aleph0Lo) === 'undefined' ? options.aleph0 : [options.aleph0Lo, options.aleph0Hi];
 
 // fold: Restaurant constants, tableToUtilityFunction
 
