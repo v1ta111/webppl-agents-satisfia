@@ -3,7 +3,7 @@
 var aleph0 = [1.2,1.4], // initial global aspiration (desired expected return)
     maxLambda = 0.95, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda = 0.05, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-    lossCoeff4variance = 1.0, // weight of variance in loss function, must be >= 0
+    lossCoeff4variance = 0.0, // weight of variance in loss function, must be >= 0
     lossCoeff4KLdiv = 1.0, // weight of KL divergence in loss function, must be >= 0
     lossCoeff4entropy = 1.0, // weight of entropy in loss function, must be >= 0
     lossCoeff4random = 0.0, // weight of random noise in loss function, must be >= 0
@@ -54,15 +54,23 @@ var stateToActions = world.stateToActions;
 // Construct indicator increment function 
 // (Note: under a "maximization" paradigm, this would be called "reward" or "utility")
 
-var indicatorIncrementTable = {
+var expectedIndicatorIncrementTable = {
   'Donut S': 1,
   'Donut N': 1,
   'Veg': 3,
   'Noodle': 2,
   'timeCost': -0.1
 };
+var varianceOfIndicatorIncrementTable = {
+  'Donut S': 0,
+  'Donut N': 0,
+  'Veg': 0,
+  'Noodle': 0,
+  'timeCost': 0.1
+};
 
-var indicatorIncrement = tableToIndicatorIncrementFct(indicatorIncrementTable, world.feature);
+var expectedIndicatorIncrement = tableToIndicatorIncrementFct(expectedIndicatorIncrementTable, world.feature),
+    varianceOfIndicatorIncrement = tableToIndicatorIncrementFct(varianceOfIndicatorIncrementTable, world.feature); 
 
 
 // Reference policy for use in KL divergence:
@@ -275,13 +283,14 @@ var makeAgent = function(indicatorIncrement) {
   var Q2 = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q2", state.loc, action, aleph);
     return expectation(Infer({ model() {
-      var r = indicatorIncrement(state, action);
+      var r = indicatorIncrement(state, action),
+          r2 = Math.pow(r,2) + varianceOfIndicatorIncrement(state, action);
       if (state.terminateAfterAction){
-        return Math.pow(r,2);
+        return r2;
       } else {
         var nextState = transition(state, action),
             nextAleph = propagateAspiration(state, aleph, action, r, nextState);
-        return Math.pow(r,2) + 2*r*V(nextState, nextAleph) + V2(nextState, nextAleph);
+        return r2 + 2*r*V(nextState, nextAleph) + V2(nextState, nextAleph);
       }
     }}));
   });
@@ -390,7 +399,7 @@ var makeAgent = function(indicatorIncrement) {
   };
 };
 
-var agent = makeAgent(indicatorIncrement), 
+var agent = makeAgent(expectedIndicatorIncrement), 
     getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagateAspiration,
     getAspiration4state = agent.getAspiration4state, V = agent.V, V2 = agent.V2,
     entropy = agent.entropy, KLdiv = agent.KLdiv;
@@ -402,31 +411,40 @@ var simulate = function(state, aleph) {
   if (debug) console.log("simulate", state, aleph);
   var localPolicy = getLocalPolicy(state, aleph);
   var action = sample(localPolicy);
-  var r = indicatorIncrement(state, action);
+  var r = expectedIndicatorIncrement(state, action),
+      r2 = Math.pow(r,2) + varianceOfIndicatorIncrement(state, action);
   var nextState = transition(state, action);
   var nextAleph = propagateAspiration(state, aleph, action, r, nextState);
   var sa = [state, action];
   if (state.terminateAfterAction) {
-    return { traj: [sa], return: r };
+    return { 
+      trajectory: [sa], // sequence of [state, action] pairs
+      conditionalExpectedIndicator: r, // expected indicator conditional on this trajectory
+      conditionalExpectedSquaredIndicator: r2 // expected squared indicator conditional on this trajectory
+    };
   } else {
     var nextOut = simulate(nextState, nextAleph);
-    return { traj: [sa].concat(nextOut.traj), return: r + nextOut.return };
+    return { 
+      trajectory: [sa].concat(nextOut.traj), 
+      conditionalExpectedIndicator: r + nextOut.conditionalExpectedIndicator,
+      conditionalExpectedSquaredIndicator: r2 + 2*r*nextOut.conditionalExpectedIndicator + nextOut.conditionalExpectedSquaredIndicator
+    };
   }
 };
 
 
 // calculate expected return and return std.dev. by using the inbuilt expectation function:
 
-var expectedReturn = expectation(Infer({ model() {
-  return simulate(mdp.startState, aleph0).return;
+var expectedIndicator = expectation(Infer({ model() {
+  return simulate(mdp.startState, aleph0).conditionalExpectedIndicator;
 }}));
-console.log("in expectation, we desired return", aleph0, "and actually get", expectedReturn);
+console.log("in expectation, we desired indicator", aleph0, "and actually get", expectedIndicator);
 
-var expectedSquaredReturn = expectation(Infer({ model() {
-  return Math.pow(simulate(mdp.startState, aleph0).return,2);
+var expectedSquaredIndicator = expectation(Infer({ model() {
+  return simulate(mdp.startState, aleph0).conditionalExpectedSquaredIndicator;
 }})),
-stddev = Math.sqrt(expectedSquaredReturn - Math.pow(expectedReturn,2));
-console.log("return has a std.dev. of", stddev, 
+stddev = Math.sqrt(expectedSquaredIndicator - Math.pow(expectedIndicator,2));
+console.log("indicator has a std.dev. of", stddev, 
             "which should equal", Math.sqrt(V2(mdp.startState, aleph0) - Math.pow(V(mdp.startState, aleph0),2)));
 
 console.log("Entropy of policy is", entropy(mdp.startState, aleph0));
@@ -435,6 +453,5 @@ console.log("KL divergence from reference policy is", KLdiv(mdp.startState, alep
 // simulate a single trajectory:
 
 var out = simulate(mdp.startState, aleph0);
-var trajectory = out.traj;
-// viz.gridworld(world, { trajectory: map(first, trajectory) })
+// viz.gridworld(world, { trajectory: map(first, out.trajectory) })
 
