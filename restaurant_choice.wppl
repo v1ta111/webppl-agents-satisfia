@@ -1,10 +1,10 @@
 // set our target aspitation and safety bound lambdas:
 
 var aleph0 = [1.2,1.4], // initial global aspiration (desired expected return)
-    maxLambda = 0.95, // upper bound on local relative aspiration in each step (must be minLambda...1)
-    minLambda = 0.05, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-    lossCoeff4variance = 0.0, // weight of variance in loss function, must be >= 0
-    lossCoeff4KLdiv = 1.0, // weight of KL divergence in loss function, must be >= 0
+    maxLambda = 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
+    minLambda = 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
+    lossCoeff4variance = 100.0, // weight of variance in loss function, must be >= 0
+    lossCoeff4KLdiv = 0.0, // weight of KL divergence in loss function, must be >= 0
     lossCoeff4entropy = 1.0, // weight of entropy in loss function, must be >= 0
     lossCoeff4random = 0.0, // weight of random noise in loss function, must be >= 0
     onlyUseClosestActions = true, // if true, only use the two actions that are closest to the target aspiration in expectation
@@ -21,8 +21,8 @@ var N = { name : 'Noodle' };
 
 var tableToIndicatorIncrementFct = function(table, feature) {
   return function(state, action) {
-    var stateFeatureName = feature(state).name;
-    return stateFeatureName ? table[stateFeatureName] : table.timeCost;
+    var f = feature(state), stateFeatureName = f.name, inc = stateFeatureName ? table[stateFeatureName] : table[f['0']];
+    return inc;
   };
 };
 // 
@@ -32,8 +32,8 @@ var tableToIndicatorIncrementFct = function(table, feature) {
 var grid = [
   ['#', '#', '#', '#',  V , '#'],
   ['#', '#', '#', ___, ___, ___],
-  ['#', '#', DN , ___, '#', ___],
-  ['#', '#', '#', ___, '#', ___],
+  ['#', '#', DN , 's', '#', ___],
+  ['#', '#', '#', 's', '#', ___],
   ['#', '#', '#', ___, ___, ___],
   ['#', '#', '#', ___, '#',  N ],
   [___, ___, ___, ___, '#', '#'],
@@ -59,18 +59,22 @@ var expectedIndicatorIncrementTable = {
   'Donut N': 1,
   'Veg': 3,
   'Noodle': 2,
-  'timeCost': -0.1
+  's': -0.3, // sand roads take time
+  ' ': -0.1
 };
 var varianceOfIndicatorIncrementTable = {
   'Donut S': 0,
   'Donut N': 0,
   'Veg': 0,
   'Noodle': 0,
-  'timeCost': 0.1
+  's': 0, // sand roads are free
+  ' ': 0.01 // normal roads might have traffic jams
 };
 
-var expectedIndicatorIncrement = tableToIndicatorIncrementFct(expectedIndicatorIncrementTable, world.feature),
-    varianceOfIndicatorIncrement = tableToIndicatorIncrementFct(varianceOfIndicatorIncrementTable, world.feature); 
+var f0 = world.feature, feature = function(s) {return extend(f0(s), {test: "hello"})};
+
+var expectedIndicatorIncrement = tableToIndicatorIncrementFct(expectedIndicatorIncrementTable, feature),
+    varianceOfIndicatorIncrement = tableToIndicatorIncrementFct(varianceOfIndicatorIncrementTable, feature); 
 
 
 // Reference policy for use in KL divergence:
@@ -188,47 +192,33 @@ var makeAgent = function(indicatorIncrement) {
   // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
   // or of the LRA-based problem (if maxLambda<1):
   var maxFeasibleQ = dp.cache(function(state, action){
-    if (debug) console.log("maxFeasibleQ", state.loc, action);
-    var r = indicatorIncrement(state, action);
-    if (state.terminateAfterAction){
-      return r;
-    } else {
-      return r + expectation(Infer({ model() { return maxFeasibleV(transition(state, action)); }}));
-    }
+    var r = indicatorIncrement(state, action),
+        q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return maxFeasibleV(transition(state, action)); }}));
+    if (debug) console.log("maxFeasibleQ", state.loc, action, q);
+    return q;
   });
   var maxFeasibleV = dp.cache(function(state){
-    if (debug) console.log("maxFeasibleV", state.loc);
     var actions = stateToActions(state),
-        Qstate = function(a) { return maxFeasibleQ(state, a); };
-    if (maxLambda == 1) {
-      return maxWith(Qstate, actions)[1];
-    } else {
-      var v = interpolate(minWith(Qstate, actions)[1], maxLambda, maxWith(Qstate, actions)[1]);
-      return v;
-    }
+        Qstate = function(a) { return maxFeasibleQ(state, a); },
+        v = maxLambda == 1 ? maxWith(Qstate, actions)[1] : interpolate(minWith(Qstate, actions)[1], maxLambda, maxWith(Qstate, actions)[1]);
+    if (debug) console.log("maxFeasibleV", state.loc, v);
+    return v;
   });
 
   // Compute the Q and V functions of the corresponding minimization (!) problem (if minLambda==0)
   // or of the LRA-based problem (if minLambda>0):
   var minFeasibleQ = dp.cache(function(state, action){
-    if (debug) console.log("minFeasibleQ", state.loc, action);
-    var r = indicatorIncrement(state, action);
-    if (state.terminateAfterAction){
-      return r;
-    } else {
-      return r + expectation(Infer({ model() { return minFeasibleV(transition(state, action)); }}));
-    }
+    var r = indicatorIncrement(state, action),
+        q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return minFeasibleV(transition(state, action)); }}));
+    if (debug) console.log("minFeasibleQ", state.loc, action, q);
+    return q;
   });
   var minFeasibleV = dp.cache(function(state){
-    if (debug) console.log("minFeasibleV", state.loc);
     var actions = stateToActions(state),
-        Qstate = function(a) { return minFeasibleQ(state, a); };
-    if (minLambda == 0) {
-      return minWith(Qstate, actions)[1];
-    } else {
-      var v = interpolate(minWith(Qstate, actions)[1], minLambda, maxWith(Qstate, actions)[1]);
-      return v;
-    }
+        Qstate = function(a) { return minFeasibleQ(state, a); },
+        v = minLambda == 0 ? minWith(Qstate, actions)[1] : interpolate(minWith(Qstate, actions)[1], minLambda, maxWith(Qstate, actions)[1]);
+    if (debug) console.log("minFeasibleV", state.loc, v);
+    return v;
   });
 
   // When using action in state, we can get any expected return in the interval
@@ -256,8 +246,9 @@ var makeAgent = function(indicatorIncrement) {
   // Therefore, when in state at incoming aspiration aleph, 
   // we adjust our aspiration to aleph clipped to that interval:
   var getAspiration4state = dp.cache(function(state, propagatedAleph){
-    if (debug) console.log("  getAspiration4state", state.loc, propagatedAleph);
-    return clip(minFeasibleV(state), propagatedAleph, maxFeasibleV(state));
+    var res = clip(minFeasibleV(state), propagatedAleph, maxFeasibleV(state));
+    if (debug) console.log("  getAspiration4state", state.loc, propagatedAleph, res);
+    return res;
   });
 
   // Actual Q and V functions of resulting policy:
