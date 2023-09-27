@@ -62,7 +62,7 @@ var transition = world.transition;
 var stateToActions = world.stateToActions;
 
 
-// Construct indicator increment function 
+// Specify distribution of indicator increments (via expected value and variancs) 
 // (Note: under a "maximization" paradigm, this would be called "reward" or "utility")
 
 var expectedIndicatorIncrementTable = {
