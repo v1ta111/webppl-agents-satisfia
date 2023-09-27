@@ -1,12 +1,13 @@
 // set our target aspitation and safety bound lambdas:
 
-var aleph0 = [0,2], // initial global aspiration (desired expected return)
+var aleph0 = [1.2,1.4], // initial global aspiration (desired expected return)
     maxLambda = 0.95, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda = 0.05, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
     lossCoeff4variance = 1.0, // weight of variance in loss function, must be >= 0
-    lossCoeff4KLdiv = 2.0, // weight of KL divergence in loss function, must be >= 0
-    lossCoeff4random = 1.0, // weight of random noise in loss function, must be >= 0
-    onlyUseClosestActions = false, // if true, only use the two actions that are closest to the target aspiration in expectation
+    lossCoeff4KLdiv = 1.0, // weight of KL divergence in loss function, must be >= 0
+    lossCoeff4entropy = 1.0, // weight of entropy in loss function, must be >= 0
+    lossCoeff4random = 0.0, // weight of random noise in loss function, must be >= 0
+    onlyUseClosestActions = true, // if true, only use the two actions that are closest to the target aspiration in expectation
     softmaxInvTemp = 1.0, // inverse temperature of softmax mixture of actions, must be > 0
     debug = false; // if true, print debug messages
 
@@ -143,14 +144,8 @@ var makeAgent = function(indicatorIncrement) {
       // - the squared deviation from expected return
       // - the KL divergence from the reference policy
       // - random noise:
-      var lossHi = function(a) { 
-            var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(qHi,2);
-            return lossCoeff4variance * (variance + Math.pow(qHi - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, p, a, aleph) + lossCoeff4random * Math.random();
-          },
-          lossLo = function(a) {
-            var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(qLo,2);
-            return lossCoeff4variance * (variance + Math.pow(qLo - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, 1-p, a, aleph) + lossCoeff4random * Math.random();
-          },
+      var lossHi = function(a) { return getLoss(state, a, aleph, vMid, qHi, p); },
+          lossLo = function(a) { return getLoss(state, a, aleph, vMid, qLo, 1-p); },
           aHi = minWith(lossHi, actionsHi)[0],
           aLo = minWith(lossLo, actionsLo)[0];
       return Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
@@ -164,25 +159,13 @@ var makeAgent = function(indicatorIncrement) {
           approxQLo = expectation(Infer({ model() { return QstateMid(uniformDraw(actionsLo)); }})),
           approxP = clip(1e-10, approxQHi > approxQLo ? (vMid - approxQLo) / (approxQHi - approxQLo) : 0.5, 1-1e-10);
       // Calculate loss for each action:          
-      var lossHi = function(a) { 
-            var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(approxQHi,2);
-            return lossCoeff4variance * (variance + Math.pow(approxQHi - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, approxP, a, aleph) + lossCoeff4random * Math.random();
-          },
-          lossLo = function(a) {
-            var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(approxQLo,2);
-            return lossCoeff4variance * (variance + Math.pow(approxQLo - vMid,2)) + lossCoeff4KLdiv * KLdivAction(state, 1-approxP, a, aleph) + lossCoeff4random * Math.random();
-          };
-      // Construct distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo that are proportional to exp(-beta*lossHi) and exp(-beta*lossLo):
-      var localPolicyHi = Infer({ model() {
-            var a = uniformDraw(actionsHi);
-            factor(-softmaxInvTemp * lossHi(a));
-            return a;
-          }}),
-          localPolicyLo = Infer({ model() {
-            var a = uniformDraw(actionsLo);
-            factor(-softmaxInvTemp * lossLo(a));
-            return a;
-          }});          
+      var lossHi = function(a) { return getLoss(state, a, aleph, vMid, approxQHi, approxP); },
+          lossLo = function(a) { return getLoss(state, a, aleph, vMid, approxQLo, 1-approxP); };
+      // Construct softmax distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo:
+      var localPolicyHi = Categorical({vs: actionsHi, 
+                                       ps: map(function(a) {return Math.exp(-softmaxInvTemp * lossHi(a))}, actionsHi)}),
+          localPolicyLo = Categorical({vs: actionsLo,
+                                       ps: map(function(a) {return Math.exp(-softmaxInvTemp * lossLo(a))}, actionsLo)}); 
       // Calculate the true qHi, qLo, and p from these distributions:
       var qHi = expectation(localPolicyHi, QstateMid),
           qLo = expectation(localPolicyLo, QstateMid),
@@ -328,6 +311,35 @@ var makeAgent = function(indicatorIncrement) {
 
   // some more safety criteria:
 
+  var entropy = dp.cache(function(state, aleph) {
+    var localPolicy = getLocalPolicy(state, aleph),
+        res = expectation(Infer({ model() {
+          var action = sample(localPolicy),
+              e = -localPolicy.score(action);
+          if (state.terminateAfterAction){
+            return e;
+          } else {
+            var nextState = transition(state, action),
+                nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
+            return e + entropy(nextState, nextAleph);
+          }
+        }}));
+    return res;
+  });
+  var entropyAction = dp.cache(function(state, p, action, aleph) {
+    var res = expectation(Infer({ model() {
+          var e = -Math.log(p);
+          if (state.terminateAfterAction){
+            return e;
+          } else {
+            var nextState = transition(state, action),
+                nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
+            return e + entropy(nextState, nextAleph);
+          }
+        }}));
+    return res;
+  });
+
   var KLdiv = dp.cache(function(state, aleph) {
     var localPolicy = getLocalPolicy(state, aleph),
         ref = refPolicy(state),
@@ -342,9 +354,6 @@ var makeAgent = function(indicatorIncrement) {
             return d + KLdiv(nextState, nextAleph);
           }
         }}));
-    if (res == -Infinity) {
-      console.log("   KLdiv", state.loc, aleph, res);
-    }
     return res;
   });
   var KLdivAction = dp.cache(function(state, p, action, aleph) {
@@ -359,11 +368,17 @@ var makeAgent = function(indicatorIncrement) {
             return d + KLdiv(nextState, nextAleph);
           }
         }}));
-    if (res == -Infinity) {
-      console.log("   KLdivAction", state.loc, p, action, aleph, res);
-    }
     return res;
   });
+
+  var getLoss = dp.cache(function(state, a, aleph, v, q, p) { 
+    var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(q,2);
+    return lossCoeff4variance * (variance + Math.pow(q - v,2)) 
+        + lossCoeff4KLdiv * KLdivAction(state, p, a, aleph) 
+        + lossCoeff4entropy * entropyAction(state, p, a, aleph)
+        + lossCoeff4random * Math.random();
+  });
+
 
   return { 
     getLocalPolicy: getLocalPolicy, propagateAspiration: propagateAspiration, 
@@ -371,14 +386,14 @@ var makeAgent = function(indicatorIncrement) {
     Q: Q, V: V, Q2: Q2, V2: V2, 
     minFeasibleQ: minFeasibleQ, maxFeasibleQ: maxFeasibleQ, 
     minFeasibleV: minFeasibleV, maxFeasibleV: maxFeasibleV,
-    KLdiv: KLdiv
+    entropy: entropy, KLdiv: KLdiv
   };
 };
 
 var agent = makeAgent(indicatorIncrement), 
     getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagateAspiration,
     getAspiration4state = agent.getAspiration4state, V = agent.V, V2 = agent.V2,
-    KLdiv = agent.KLdiv;
+    entropy = agent.entropy, KLdiv = agent.KLdiv;
 
 // Generate and draw a trajectory
 
@@ -414,6 +429,7 @@ stddev = Math.sqrt(expectedSquaredReturn - Math.pow(expectedReturn,2));
 console.log("return has a std.dev. of", stddev, 
             "which should equal", Math.sqrt(V2(mdp.startState, aleph0) - Math.pow(V(mdp.startState, aleph0),2)));
 
+console.log("Entropy of policy is", entropy(mdp.startState, aleph0));
 console.log("KL divergence from reference policy is", KLdiv(mdp.startState, aleph0));
 
 // simulate a single trajectory:
