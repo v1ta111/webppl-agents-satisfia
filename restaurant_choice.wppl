@@ -1,3 +1,5 @@
+// in Browser, uncomment the following line:
+// var argv = {};
 
 // agent parameters:
 var params = extend({
@@ -18,7 +20,7 @@ var options = extend({
       debug: false, // if true, print debug messages
     }, argv),
     aleph0 = options.aleph0;
-    
+
 // fold: Restaurant constants, tableToUtilityFunction
 
 var ___ = ' ';
@@ -459,7 +461,7 @@ var simulate = function(state, aleph) {
   } else {
     var nextOut = simulate(nextState, nextAleph);
     return { 
-      trajectory: [sa].concat(nextOut.traj), 
+      trajectory: [sa].concat(nextOut.trajectory), 
       conditionalExpectedIndicator: r + nextOut.conditionalExpectedIndicator,
       conditionalExpectedSquaredIndicator: r2 + 2*r*nextOut.conditionalExpectedIndicator + nextOut.conditionalExpectedSquaredIndicator
     };
@@ -487,5 +489,5 @@ console.log("KL divergence from reference policy is", KLdiv(mdp.startState, alep
 // simulate a single trajectory:
 
 var out = simulate(mdp.startState, aleph0);
-// viz.gridworld(world, { trajectory: map(first, out.trajectory) })
+viz.gridworld(world, { trajectory: map(first, out.trajectory) })
 
