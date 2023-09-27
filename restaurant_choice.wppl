@@ -1,15 +1,20 @@
 // set our target aspitation and safety bound lambdas:
 
-var aleph0 = [1.2,1.4], // initial global aspiration (desired expected return)
-    maxLambda = 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
-    minLambda = 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-    lossCoeff4variance = 100.0, // weight of variance in loss function, must be >= 0
-    lossCoeff4KLdiv = 0.0, // weight of KL divergence in loss function, must be >= 0
-    lossCoeff4entropy = 1.0, // weight of entropy in loss function, must be >= 0
-    lossCoeff4random = 0.0, // weight of random noise in loss function, must be >= 0
-    onlyUseClosestActions = true, // if true, only use the two actions that are closest to the target aspiration in expectation
-    softmaxInvTemp = 1.0, // inverse temperature of softmax mixture of actions, must be > 0
-    debug = false; // if true, print debug messages
+var aleph0 = [1.2,1.4]; // initial global aspiration (desired expected return);
+var params = {
+    maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
+    minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
+    lossCoeff4variance: 100.0, // weight of variance in loss function, must be >= 0
+    lossCoeff4KLdiv: 0.0, // weight of KL divergence in loss function, must be >= 0
+    lossCoeff4entropy: 1.0, // weight of entropy in loss function, must be >= 0
+    lossCoeff4random: 0.0, // weight of random noise in loss function, must be >= 0
+    onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
+    softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
+    rescalingDegree: 1.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
+  };
+var options = {
+    debug: false // if true, print debug messages
+};
 
 // fold: Restaurant constants, tableToUtilityFunction
 
@@ -77,12 +82,19 @@ var expectedIndicatorIncrement = tableToIndicatorIncrementFct(expectedIndicatorI
     varianceOfIndicatorIncrement = tableToIndicatorIncrementFct(varianceOfIndicatorIncrementTable, feature); 
 
 
+// uninformedP policy for use in Shannon entropy: 
+var uninformedPolicy = function(state) {
+  return Categorical({vs: ["u", "d", "l", "r"], ps: [0.25, 0.25, 0.25, 0.25]});
+}
+// (Note: when refining an action a into variants a', a'', 
+// the probabilities of a under uninformedPolicy should split into two parts for a' and a'' additively,
+// since then behavior remains consistent. In particular, if an action is cloned and its uninformedPolicy 
+// probability is split somehow, behavior should remain invariant.)
+
 // Reference policy for use in KL divergence:
-
 var refPolicy = function(state) { 
-  return Categorical({ps: [0.7, 0.1, 0.1, 0.1], vs: ["u", "d", "l", "r"]}); 
+  return Categorical({vs: ["u", "d", "l", "r"], ps: [0.7, 0.1, 0.1, 0.1]}); 
 };
-
 
 // Auxiliary functions:
 
@@ -128,11 +140,26 @@ var intersect = function(interval1, interval2) {
 
 // Construct agent
 
-var makeAgent = function(o) {
+var makeAgent = function(world, params, options) {
+
+  // extract world, behavioral parameters, and options:
+  var stateToActions = world.stateToActions, transition = world.transition;
+  var expectedIndicatorIncrement = params.expectedIndicatorIncrement,
+      varianceOfIndicatorIncrement = params.varianceOfIndicatorIncrement,
+      minLambda = params.minLambda, maxLambda = params.maxLambda,
+      uninformedPolicy = params.uninformedPolicy, refPolicy = params.refPolicy,
+      lossCoeff4variance = params.lossCoeff4variance,
+      lossCoeff4entropy = params.lossCoeff4entropy,
+      lossCoeff4KLdiv = params.lossCoeff4KLdiv,
+      lossCoeff4random = params.lossCoeff4random,
+      onlyUseClosestActions = params.onlyUseClosestActions,
+      softmaxInvTemp = params.softmaxInvTemp,
+      rescalingDegree = params.rescalingDegree;
+  var debug = options.debug;
 
   var getLocalPolicy = dp.cache(function(state, aleph){
     if (debug) console.log(" getLocalPolicy", state.loc, aleph);
-    // The following quantities are later potentially intervals: aleph, v, Qstate(a)
+    // The following quantities are potentially intervals: aleph, v, Qstate(a)
 
     // Use aspiration aleph to set the desired expected return for this state before (!) having chosen an action:
     var v = getAspiration4state(state, aleph),
@@ -143,6 +170,7 @@ var makeAgent = function(o) {
         QstateMid = _.isArray(v) ? function(a) { var q = Qstate(a); return (q[0]+q[1])/2; } : Qstate;
 
     if (onlyUseClosestActions) {
+      
       // Find the two QstateMid table entries, qHi and qLo, that are closest to vMid from above and below: 
       var qHi = minWith(function(a) {return QstateMid(a) >= vMid ? QstateMid(a) : 1e10}, actions)[1],
           qLo = maxWith(function(a) {return QstateMid(a) <= vMid ? QstateMid(a) : -1e10}, actions)[1];
@@ -152,17 +180,17 @@ var makeAgent = function(o) {
       var p = qHi > qLo ? (vMid - qLo) / (qHi - qLo) : 0.5;
       if (debug) console.log("  qHi, qLo, actionsHi, actionsLo, p", qHi, qLo, actionsHi, actionsLo, p);
 
-      // From those actions that meet these values, choose a pair that optimizes an additional safety criterion composed of
-      // - the squared deviation from expected return
-      // - the KL divergence from the reference policy
-      // - random noise:
+      // From those actions that meet these values, choose a pair that optimizes 
+      // an additional safety criterion encoded in a loss function (see below):
       var lossHi = function(a) { return getLoss(state, a, aleph, vMid, qHi, p); },
           lossLo = function(a) { return getLoss(state, a, aleph, vMid, qLo, 1-p); },
           aHi = minWith(lossHi, actionsHi)[0],
           aLo = minWith(lossLo, actionsLo)[0];
       return Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
+
     } else {
-      // Use a softmax mixture of all actions, based on loss.
+      
+      // Use a softmax mixture of all actions, based on the safety loss.
       // First devide actions into those that are above and below vMid:
       var actionsHi = filter(function(a) {return QstateMid(a) >= vMid}, actions),
           actionsLo = filter(function(a) {return QstateMid(a) <= vMid}, actions);
@@ -184,6 +212,7 @@ var makeAgent = function(o) {
           p = clip(1e-10, qHi > qLo ? (vMid - qLo) / (qHi - qLo) : 0.5, 1-1e-10);
       // Finally, mix the two local policies with the true p:
       return Mixture({ps: [p, 1-p], dists: [localPolicyHi, localPolicyLo]});
+
     }
   });
 
@@ -192,7 +221,7 @@ var makeAgent = function(o) {
   // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
   // or of the LRA-based problem (if maxLambda<1):
   var maxFeasibleQ = dp.cache(function(state, action){
-    var r = o.expectedIndicatorIncrement(state, action),
+    var r = expectedIndicatorIncrement(state, action),
         q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return maxFeasibleV(transition(state, action)); }}));
     if (debug) console.log("maxFeasibleQ", state.loc, action, q);
     return q;
@@ -293,6 +322,10 @@ var makeAgent = function(o) {
   var propagateAspiration = dp.cache(function(state, aleph4state, action, r, nextState){
     if (debug) console.log(" propagateAspiration", state.loc, aleph4state, action, r, nextState.loc);
 
+    // the propagated aspiration is a mixture of a steadfast and a rescaled part:
+
+    var steadfastAleph4nextState = _.isArray(aleph4state) ? [aleph4state[0] - r, aleph4state[1] - r] : aleph4state - r;
+
     // recover the aspiration that we had after choosing action, before knowing which state we would land in:
     // (Note: We have E(q | action ~ localPolicy) = v) by construction of localPolicy in getLocaPolicy().)
     var q = getAspiration4action(state, action, aleph4state);
@@ -304,18 +337,20 @@ var makeAgent = function(o) {
     // (this is between 0 and 1 by definition of q and Q.)
 
     // rescale the target to the feasibility interval of the state that we landed in:
-    var aleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
+    var rescaledAleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
+    // (only this part preserves aspiration in expectation)
 
-    return aleph4nextState;
+    return interpolate(steadfastAleph4nextState, rescalingDegree, rescaledAleph4nextState);
   });
 
   // some more safety criteria:
 
+  // Shannon entropy relative to uninformedPolicy:
   var entropy = dp.cache(function(state, aleph) {
     var localPolicy = getLocalPolicy(state, aleph),
         res = expectation(Infer({ model() {
           var action = sample(localPolicy),
-              e = -localPolicy.score(action);
+              e = uninformedPolicy(state).score(action) - localPolicy.score(action);
           if (state.terminateAfterAction){
             return e;
           } else {
@@ -328,7 +363,7 @@ var makeAgent = function(o) {
   });
   var entropyAction = dp.cache(function(state, p, action, aleph) {
     var res = expectation(Infer({ model() {
-          var e = -Math.log(p);
+          var e = uninformedPolicy(state).score(action) - Math.log(p);
           if (state.terminateAfterAction){
             return e;
           } else {
@@ -379,7 +414,6 @@ var makeAgent = function(o) {
         + lossCoeff4random * Math.random();
   });
 
-
   return { 
     getLocalPolicy: getLocalPolicy, propagateAspiration: propagateAspiration, 
     getAspiration4action: getAspiration4action, getAspiration4state: getAspiration4state, 
@@ -390,16 +424,21 @@ var makeAgent = function(o) {
   };
 };
 
-var agent = makeAgent({expectedIndicatorIncrement}), 
-    getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagateAspiration,
-    getAspiration4state = agent.getAspiration4state, V = agent.V, V2 = agent.V2,
+// initialize the agent
+var agent = makeAgent(world, extend(params, {
+      expectedIndicatorIncrement, varianceOfIndicatorIncrement, 
+      uninformedPolicy, refPolicy
+    }), options);
+
+// extract its methods:
+var getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagateAspiration,
+    getAspiration4state = agent.getAspiration4state, 
+    V = agent.V, V2 = agent.V2,
     entropy = agent.entropy, KLdiv = agent.KLdiv;
 
-// Generate and draw a trajectory
-
-
+// Generate and draw a trajectory:
 var simulate = function(state, aleph) {
-  if (debug) console.log("simulate", state, aleph);
+  if (options.debug) console.log("simulate", state, aleph);
   var localPolicy = getLocalPolicy(state, aleph);
   var action = sample(localPolicy);
   var r = expectedIndicatorIncrement(state, action),
