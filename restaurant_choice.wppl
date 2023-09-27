@@ -128,7 +128,7 @@ var intersect = function(interval1, interval2) {
 
 // Construct agent
 
-var makeAgent = function(indicatorIncrement) {
+var makeAgent = function(o) {
 
   var getLocalPolicy = dp.cache(function(state, aleph){
     if (debug) console.log(" getLocalPolicy", state.loc, aleph);
@@ -192,7 +192,7 @@ var makeAgent = function(indicatorIncrement) {
   // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
   // or of the LRA-based problem (if maxLambda<1):
   var maxFeasibleQ = dp.cache(function(state, action){
-    var r = indicatorIncrement(state, action),
+    var r = o.expectedIndicatorIncrement(state, action),
         q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return maxFeasibleV(transition(state, action)); }}));
     if (debug) console.log("maxFeasibleQ", state.loc, action, q);
     return q;
@@ -208,7 +208,7 @@ var makeAgent = function(indicatorIncrement) {
   // Compute the Q and V functions of the corresponding minimization (!) problem (if minLambda==0)
   // or of the LRA-based problem (if minLambda>0):
   var minFeasibleQ = dp.cache(function(state, action){
-    var r = indicatorIncrement(state, action),
+    var r = expectedIndicatorIncrement(state, action),
         q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return minFeasibleV(transition(state, action)); }}));
     if (debug) console.log("minFeasibleQ", state.loc, action, q);
     return q;
@@ -255,7 +255,7 @@ var makeAgent = function(indicatorIncrement) {
   var Q = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q", state.loc, action, aleph);
     return expectation(Infer({ model() {
-      var r = indicatorIncrement(state, action);
+      var r = expectedIndicatorIncrement(state, action);
       if (state.terminateAfterAction){
         return r;
       } else {
@@ -274,7 +274,7 @@ var makeAgent = function(indicatorIncrement) {
   var Q2 = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q2", state.loc, action, aleph);
     return expectation(Infer({ model() {
-      var r = indicatorIncrement(state, action),
+      var r = expectedIndicatorIncrement(state, action),
           r2 = Math.pow(r,2) + varianceOfIndicatorIncrement(state, action);
       if (state.terminateAfterAction){
         return r2;
@@ -320,7 +320,7 @@ var makeAgent = function(indicatorIncrement) {
             return e;
           } else {
             var nextState = transition(state, action),
-                nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
+                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
             return e + entropy(nextState, nextAleph);
           }
         }}));
@@ -333,7 +333,7 @@ var makeAgent = function(indicatorIncrement) {
             return e;
           } else {
             var nextState = transition(state, action),
-                nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
+                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
             return e + entropy(nextState, nextAleph);
           }
         }}));
@@ -350,7 +350,7 @@ var makeAgent = function(indicatorIncrement) {
             return d;
           } else {
             var nextState = transition(state, action),
-                nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
+                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
             return d + KLdiv(nextState, nextAleph);
           }
         }}));
@@ -364,7 +364,7 @@ var makeAgent = function(indicatorIncrement) {
             return d;
           } else {
             var nextState = transition(state, action),
-                nextAleph = propagateAspiration(state, aleph, action, indicatorIncrement(state, action), nextState);
+                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
             return d + KLdiv(nextState, nextAleph);
           }
         }}));
@@ -390,7 +390,7 @@ var makeAgent = function(indicatorIncrement) {
   };
 };
 
-var agent = makeAgent(expectedIndicatorIncrement), 
+var agent = makeAgent({expectedIndicatorIncrement}), 
     getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagateAspiration,
     getAspiration4state = agent.getAspiration4state, V = agent.V, V2 = agent.V2,
     entropy = agent.entropy, KLdiv = agent.KLdiv;
