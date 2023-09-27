@@ -9,6 +9,7 @@
     "jsdom": "^8.0.0",
     "paper": "^0.9.25",
     "underscore": "^1.8.3",
+    "webppl-editor": "github:probmods/webppl-editor",
     "webppl-viz": "github:probmods/webppl-viz"
   },
   "scripts": {

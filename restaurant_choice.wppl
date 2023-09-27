@@ -1,5 +1,6 @@
 // make sure code runs in browser and on command line:
-var _argv = typeof(argv) === 'undefined' ? {} : argv;
+var inBrowser = typeof(argv) === 'undefined',
+    _argv = inBrowser ? {} : argv;
 
 // agent parameters:
 var params = extend({
@@ -486,8 +487,8 @@ console.log("indicator has a std.dev. of", stddev,
 console.log("Entropy of policy is", entropy(mdp.startState, aleph0));
 console.log("KL divergence from reference policy is", KLdiv(mdp.startState, aleph0));
 
-// simulate a single trajectory:
-
-var out = simulate(mdp.startState, aleph0);
-viz.gridworld(world, { trajectory: map(first, out.trajectory) })
-
+if (inBrowser) {
+  // simulate and show a single trajectory:
+  var out = simulate(mdp.startState, aleph0);
+  viz.gridworld(world, { trajectory: map(first, out.trajectory) })
+}
