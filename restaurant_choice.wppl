@@ -1,7 +1,6 @@
-// set our target aspitation and safety bound lambdas:
 
-var aleph0 = [1.2,1.4]; // initial global aspiration (desired expected return);
-var params = {
+// agent parameters:
+var params = extend({
     maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
     lossCoeff4variance: 100.0, // weight of variance in loss function, must be >= 0
@@ -11,11 +10,15 @@ var params = {
     onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
     softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
     rescalingDegree: 1.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
-  };
-var options = {
-    debug: false // if true, print debug messages
-};
+  }, argv);
 
+// simulation options:
+var options = extend({
+      aleph0: [1.2,1.4], // initial global aspiration (desired expected return);
+      debug: false, // if true, print debug messages
+    }, argv),
+    aleph0 = options.aleph0;
+    
 // fold: Restaurant constants, tableToUtilityFunction
 
 var ___ = ' ';
@@ -91,7 +94,8 @@ var uninformedPolicy = function(state) {
 // since then behavior remains consistent. In particular, if an action is cloned and its uninformedPolicy 
 // probability is split somehow, behavior should remain invariant.)
 
-// Reference policy for use in KL divergence:
+// Reference policy for use in KL divergence
+// (can be used to steer agent towards certain actions):
 var refPolicy = function(state) { 
   return Categorical({vs: ["u", "d", "l", "r"], ps: [0.7, 0.1, 0.1, 0.1]}); 
 };
@@ -334,7 +338,7 @@ var makeAgent = function(world, params, options) {
     //    r plus next feasibility interval 
     // before we knew which state we would land in:
     var lam = relativePosition(minFeasibleQ(state, action), q, maxFeasibleQ(state, action)); 
-    // (this is between 0 and 1 by definition of q and Q.)
+    // (this is between 0 and 1 by definition of q.)
 
     // rescale the target to the feasibility interval of the state that we landed in:
     var rescaledAleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
