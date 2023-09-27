@@ -1,3 +1,4 @@
+// make sure code runs in browser and on command line:
 var _argv = typeof(argv) === 'undefined' ? {} : argv;
 
 // agent parameters:
