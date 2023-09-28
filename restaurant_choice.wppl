@@ -507,7 +507,11 @@ var data1 = {
   key1: 'expectedIndicator',
   value1: expectedIndicator,
   key2: 'aleph0',
-  value2: aleph0
+  value2: aleph0,
+  key3: 'maxLambda',
+  value3: params.maxLambda,
+  key4: 'minLambda',
+  value4: params.minLambda
 };
 
 // Add new data to the existing data
@@ -515,4 +519,3 @@ existingData.push(data1);
 
 // Write the updated data back to the JSON file
 json.write(filename, existingData);
-
