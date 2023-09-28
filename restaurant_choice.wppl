@@ -492,3 +492,27 @@ if (inBrowser) {
   var out = simulate(mdp.startState, aleph0);
   viz.gridworld(world, { trajectory: map(first, out.trajectory) })
 }
+
+
+
+
+// Define the filename for the JSON file
+var filename = 'output.json';
+
+// Read existing JSON data from the file (if it exists)
+var existingData = json.read(filename) || [];
+
+// Assuming you have a single data object with keys and values
+var data1 = {
+  key1: 'expectedIndicator',
+  value1: expectedIndicator,
+  key2: 'aleph0',
+  value2: aleph0
+};
+
+// Add new data to the existing data
+existingData.push(data1);
+
+// Write the updated data back to the JSON file
+json.write(filename, existingData);
+
