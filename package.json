@@ -10,6 +10,8 @@
     "paper": "^0.9.25",
     "underscore": "^1.8.3",
     "webppl-editor": "github:probmods/webppl-editor",
+    "webppl-json": "^0.0.1",
+    "webppl-timeit": "^0.3.0",
     "webppl-viz": "github:probmods/webppl-viz"
   },
   "scripts": {

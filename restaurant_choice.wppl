@@ -487,14 +487,23 @@ console.log("indicator has a std.dev. of", stddev,
 console.log("Entropy of policy is", entropy(mdp.startState, aleph0));
 console.log("KL divergence from reference policy is", KLdiv(mdp.startState, aleph0));
 
+// simulate and show a single trajectory:
+var out = simulate(mdp.startState, aleph0);
 if (inBrowser) {
-  // simulate and show a single trajectory:
-  var out = simulate(mdp.startState, aleph0);
   viz.gridworld(world, { trajectory: map(first, out.trajectory) })
+} else {
+  // make ascii art visualization of trajectory
+  var f = world.features, h = f.length, w = f[0].length, ys = _.range(h).reverse(), xs = _.range(w).reverse();
+  map(function(y) { 
+    var char = function(x, text) { 
+      var sas = filter(function(sa) {return sa[0].loc[0] == x && sa[0].loc[1] == y}, out.trajectory),
+          g = grid[y][x],
+          char = sas.length > 0 ? sas[0][1] : _.isString(g) ? g : '$';
+      return text + char + " ";
+    };
+    console.log(reduce(char, "", xs));
+  }, ys);
 }
-
-
-
 
 // Define the filename for the JSON file
 var filename = 'output.json';
