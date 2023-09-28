@@ -9,3 +9,4 @@ runHtml/assets/js/webppl.js
 codeboxes
 npm-debug.log
 src/agents/selfModellingAgent.wppl
+output.json
