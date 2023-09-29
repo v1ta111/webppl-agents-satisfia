@@ -160,7 +160,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   var expectedIndicatorIncrement = params.expectedIndicatorIncrement,
       varianceOfIndicatorIncrement = params.varianceOfIndicatorIncrement,
       minLambda = params.minLambda, maxLambda = params.maxLambda,
-      uninformedPolicy = params.uninformedPolicy, // FIXME: does not work yet: || function(state) { return Categorical({vs: stateToActions(state), ps: repeat(1.0, stateToActions(state).length)}); },
+      uninformedPolicy = params.uninformedPolicy,
       refPolicy = params.refPolicy,
       internalEntropy = params.internalEntropy,
       lossCoeff4variance = params.lossCoeff4variance,
@@ -227,13 +227,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
       var lossHi = function(a) { return getLoss(state, a, aleph, vMid, approxQHi, approxP); },
           lossLo = function(a) { return getLoss(state, a, aleph, vMid, approxQLo, 1-approxP); };
       // Construct softmax distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo:
-      var defaultPolicy = uninformedPolicy(state),
-          localPolicyHi = Categorical({vs: actionsHi, 
-                                       ps: map(function(a) {return Math.exp(defaultPolicy.score(a) 
-                                                            - softmaxInvTemp * lossHi(a))}, actionsHi)}),
-          localPolicyLo = Categorical({vs: actionsLo,
-                                       ps: map(function(a) {return Math.exp(defaultPolicy.score(a) 
-                                                            - softmaxInvTemp * lossLo(a))}, actionsLo)}); 
+      var defaultPolicy = uninformedPolicy ? uninformedPolicy(state) : undefined,
+          probabilityFct = function(a) {
+            return Math.exp((defaultPolicy ? defaultPolicy.score(a) : 0) - softmaxInvTemp * lossHi(a))
+          },
+          localPolicyHi = Categorical({vs: actionsHi, ps: map(probabilityFct, actionsHi)}),
+          localPolicyLo = Categorical({vs: actionsLo, ps: map(probabilityFct, actionsLo)}); 
       // Calculate the true qHi, qLo, and p from these distributions:
       var qHi = expectation(localPolicyHi, QstateMid),
           qLo = expectation(localPolicyLo, QstateMid),
