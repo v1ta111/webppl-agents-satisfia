@@ -472,7 +472,7 @@ var asInterval = function(x) { return _.isArray(x) ? x : [x,x]; };
 
 var interpolate = function(x, lam, y) {
   // this is denoted  x : lam : y  in formulas
-if (_.isArray(x) || _.isArray(lam) || _.isArray(y)) {
+  if (_.isArray(x) || _.isArray(lam) || _.isArray(y)) {
     // one argument is an interval, so everything becomes an interval:
     var xx = asInterval(x), lamlam = asInterval(lam), yy = asInterval(y);
     return [xx[0] + lamlam[0] * (yy[0] - xx[0]), 
