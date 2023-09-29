@@ -10,3 +10,4 @@ codeboxes
 npm-debug.log
 src/agents/selfModellingAgent.wppl
 output.json
+output_rotateminlambda.json
