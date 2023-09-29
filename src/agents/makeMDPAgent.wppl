@@ -1,5 +1,3 @@
-// TODO: add makeMDPAgentRLA with parameter rla (or rlaMin and rlaMax) rather than alpha
-
 var hasProperties = function(object, listProperties) {
   assert.ok(_.isObject(object) && _.isArray(listProperties), 'fail hasProperties');
   return _.every(map(
@@ -134,3 +132,336 @@ var makeMDPAgent = function(params, world) {
           makeMDPAgentOptimal(params, world) :
           makeMDPAgentHyperbolic(params, world));
 };
+
+
+
+// SatisfIA agent:
+
+var makeMDPAgentSatisfia = function(params, world) {
+
+  // extract parameters, options, and world:
+  var expectedIndicatorIncrement = params.expectedIndicatorIncrement,
+      varianceOfIndicatorIncrement = params.varianceOfIndicatorIncrement,
+      minLambda = params.minLambda, maxLambda = params.maxLambda,
+      uninformedPolicy = params.uninformedPolicy, refPolicy = params.refPolicy,
+      lossCoeff4variance = params.lossCoeff4variance,
+      lossCoeff4entropy = params.lossCoeff4entropy,
+      lossCoeff4KLdiv = params.lossCoeff4KLdiv,
+      lossCoeff4random = params.lossCoeff4random,
+      onlyUseClosestActions = params.onlyUseClosestActions,
+      softmaxInvTemp = params.softmaxInvTemp,
+      rescalingDegree = params.rescalingDegree;
+  var options = params.options, 
+      debug = options.debug;
+  var stateToActions = world.stateToActions, transition = world.transition;
+
+  var getLocalPolicy = dp.cache(function(state, aleph){
+    if (debug) console.log(" getLocalPolicy", state.loc, aleph);
+    // The following quantities are potentially intervals: aleph, v, Qstate(a)
+
+    // Use aspiration aleph to set the desired expected return for this state before (!) having chosen an action:
+    var v = getAspiration4state(state, aleph),
+        actions = stateToActions(state),
+        Qstate = function(a) { return getAspiration4action(state, a, v); };
+    // Meet point v or midpoint of interval v with a mixture of at most two actions:
+    var vMid = _.isArray(v) ? (v[0]+v[1])/2 : v,
+        QstateMid = _.isArray(v) ? function(a) { var q = Qstate(a); return (q[0]+q[1])/2; } : Qstate;
+
+    if (onlyUseClosestActions) {
+      
+      // Find the two QstateMid table entries, qHi and qLo, that are closest to vMid from above and below: 
+      var qHi = minWith(function(a) {return QstateMid(a) >= vMid ? QstateMid(a) : 1e10}, actions)[1],
+          qLo = maxWith(function(a) {return QstateMid(a) <= vMid ? QstateMid(a) : -1e10}, actions)[1];
+      var actionsHi = filter(function(a) {return QstateMid(a) == qHi}, actions),
+          actionsLo = filter(function(a) {return QstateMid(a) == qLo}, actions);
+      // Our local policy that guarantees v in expectation is a suitable mixture of these two actions:
+      var p = qHi > qLo ? (vMid - qLo) / (qHi - qLo) : 0.5;
+      if (debug) console.log("  qHi, qLo, actionsHi, actionsLo, p", qHi, qLo, actionsHi, actionsLo, p);
+
+      // From those actions that meet these values, choose a pair that optimizes 
+      // an additional safety criterion encoded in a loss function (see below):
+      var lossHi = function(a) { return getLoss(state, a, aleph, vMid, qHi, p); },
+          lossLo = function(a) { return getLoss(state, a, aleph, vMid, qLo, 1-p); },
+          aHi = minWith(lossHi, actionsHi)[0],
+          aLo = minWith(lossLo, actionsLo)[0];
+      return Categorical({ps: [p, 1-p], vs: [aHi, aLo]});
+
+    } else {
+      
+      // Use a softmax mixture of all actions, based on the safety loss.
+      // First devide actions into those that are above and below vMid:
+      var actionsHi = filter(function(a) {return QstateMid(a) >= vMid}, actions),
+          actionsLo = filter(function(a) {return QstateMid(a) <= vMid}, actions);
+      // Calculate an approximate relative mixture coefficient p for upper group, to be used for approximating KLdiv:
+      var approxQHi = expectation(Infer({ model() { return QstateMid(uniformDraw(actionsHi)); }})),
+          approxQLo = expectation(Infer({ model() { return QstateMid(uniformDraw(actionsLo)); }})),
+          approxP = clip(1e-10, approxQHi > approxQLo ? (vMid - approxQLo) / (approxQHi - approxQLo) : 0.5, 1-1e-10);
+      // Calculate loss for each action:          
+      var lossHi = function(a) { return getLoss(state, a, aleph, vMid, approxQHi, approxP); },
+          lossLo = function(a) { return getLoss(state, a, aleph, vMid, approxQLo, 1-approxP); };
+      // Construct softmax distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo:
+      var localPolicyHi = Categorical({vs: actionsHi, 
+                                       ps: map(function(a) {return Math.exp(-softmaxInvTemp * lossHi(a))}, actionsHi)}),
+          localPolicyLo = Categorical({vs: actionsLo,
+                                       ps: map(function(a) {return Math.exp(-softmaxInvTemp * lossLo(a))}, actionsLo)}); 
+      // Calculate the true qHi, qLo, and p from these distributions:
+      var qHi = expectation(localPolicyHi, QstateMid),
+          qLo = expectation(localPolicyLo, QstateMid),
+          p = clip(1e-10, qHi > qLo ? (vMid - qLo) / (qHi - qLo) : 0.5, 1-1e-10);
+      // Finally, mix the two local policies with the true p:
+      return Mixture({ps: [p, 1-p], dists: [localPolicyHi, localPolicyLo]});
+
+    }
+  });
+
+  // Compute upper and lower feasibility bounds for Q and V that are allowed in view of maxLambda and minLambda:
+
+  // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
+  // or of the LRA-based problem (if maxLambda<1):
+  var maxFeasibleQ = dp.cache(function(state, action){
+    var r = expectedIndicatorIncrement(state, action),
+        q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return maxFeasibleV(transition(state, action)); }}));
+    if (debug) console.log("maxFeasibleQ", state.loc, action, q);
+    return q;
+  });
+  var maxFeasibleV = dp.cache(function(state){
+    var actions = stateToActions(state),
+        Qstate = function(a) { return maxFeasibleQ(state, a); },
+        v = maxLambda == 1 ? maxWith(Qstate, actions)[1] : interpolate(minWith(Qstate, actions)[1], maxLambda, maxWith(Qstate, actions)[1]);
+    if (debug) console.log("maxFeasibleV", state.loc, v);
+    return v;
+  });
+
+  // Compute the Q and V functions of the corresponding minimization (!) problem (if minLambda==0)
+  // or of the LRA-based problem (if minLambda>0):
+  var minFeasibleQ = dp.cache(function(state, action){
+    var r = expectedIndicatorIncrement(state, action),
+        q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return minFeasibleV(transition(state, action)); }}));
+    if (debug) console.log("minFeasibleQ", state.loc, action, q);
+    return q;
+  });
+  var minFeasibleV = dp.cache(function(state){
+    var actions = stateToActions(state),
+        Qstate = function(a) { return minFeasibleQ(state, a); },
+        v = minLambda == 0 ? minWith(Qstate, actions)[1] : interpolate(minWith(Qstate, actions)[1], minLambda, maxWith(Qstate, actions)[1]);
+    if (debug) console.log("minFeasibleV", state.loc, v);
+    return v;
+  });
+
+  // When using action in state, we can get any expected return in the interval
+  // [minFeasibleQ(state, action), maxFeasibleQ(state, action)].
+  var getAspiration4action = dp.cache(function(state, action, aleph4state){
+    if (debug) console.log("  getAspiration4action", state.loc, action, aleph4state)
+    var qLo = minFeasibleQ(state, action),
+        qHi = maxFeasibleQ(state, action);
+    if (!_.isArray(aleph4state)) {
+      // So when having aspiration aleph, we can still fulfill it in expectation if it lies in the interval.
+      // Therefore, when using action in state at aspiration aleph, 
+      // we set our aspiration when choosing this action to aleph clipped to that interval:
+      return clip(qLo, aleph4state, qHi);
+    } else {
+      // For interval aleph, we choose an interval that guarantees that the resulting mixed interval of all
+      // localPolicies that getLocalPolicy() may mix with this action will be within aleph: 
+      var alLo = aleph4state[0], alHi = aleph4state[1], w = alHi - alLo;
+      return [Math.max(qLo, Math.min(alLo, qHi - w)), 
+              Math.min(qHi, Math.max(alHi, qLo + w))];
+    }
+  });
+  // When in state, we can get any expected return in the interval
+  // [minFeasibleV(state), maxFeasibleV(state)].
+  // So when having aspiration aleph, we can still fulfill it in expectation if it lies in the interval.
+  // Therefore, when in state at incoming aspiration aleph, 
+  // we adjust our aspiration to aleph clipped to that interval:
+  var getAspiration4state = dp.cache(function(state, propagatedAleph){
+    var res = clip(minFeasibleV(state), propagatedAleph, maxFeasibleV(state));
+    if (debug) console.log("  getAspiration4state", state.loc, propagatedAleph, res);
+    return res;
+  });
+
+  // Actual Q and V functions of resulting policy:
+  var Q = dp.cache(function(state, action, aleph){
+    if (debug) console.log("  Q", state.loc, action, aleph);
+    return expectation(Infer({ model() {
+      var r = expectedIndicatorIncrement(state, action);
+      if (state.terminateAfterAction){
+        return r;
+      } else {
+        var nextState = transition(state, action),
+            nextAleph = propagateAspiration(state, aleph, action, r, nextState);
+        return r + V(nextState, nextAleph);
+      }
+    }}));
+  });
+  var V = dp.cache(function(state, aleph){
+    if (debug) console.log(" V", state.loc, aleph);
+    return expectation(Infer({ model() { return Q(state, sample(getLocalPolicy(state, aleph)), aleph); }}));
+  });
+
+  // Expected squared return, for computing the variance of return:
+  var Q2 = dp.cache(function(state, action, aleph){
+    if (debug) console.log("  Q2", state.loc, action, aleph);
+    return expectation(Infer({ model() {
+      var r = expectedIndicatorIncrement(state, action),
+          r2 = Math.pow(r,2) + varianceOfIndicatorIncrement(state, action);
+      if (state.terminateAfterAction){
+        return r2;
+      } else {
+        var nextState = transition(state, action),
+            nextAleph = propagateAspiration(state, aleph, action, r, nextState);
+        return r2 + 2*r*V(nextState, nextAleph) + V2(nextState, nextAleph);
+      }
+    }}));
+  });
+  var V2 = dp.cache(function(state, aleph){
+    if (debug) console.log(" V2", state.loc, aleph);
+    return expectation(Infer({ model() { return Q2(state, sample(getLocalPolicy(state, aleph)), aleph); }}));
+  });
+
+  var propagateAspiration = dp.cache(function(state, aleph4state, action, r, nextState){
+    if (debug) console.log(" propagateAspiration", state.loc, aleph4state, action, r, nextState.loc);
+
+    // the propagated aspiration is a mixture of a steadfast and a rescaled part:
+
+    var steadfastAleph4nextState = _.isArray(aleph4state) ? [aleph4state[0] - r, aleph4state[1] - r] : aleph4state - r;
+
+    // recover the aspiration that we had after choosing action, before knowing which state we would land in:
+    // (Note: We have E(q | action ~ localPolicy) = v) by construction of localPolicy in getLocaPolicy().)
+    var q = getAspiration4action(state, action, aleph4state);
+
+    // compute the relative position of that target in the expectation that we had of 
+    //    r plus next feasibility interval 
+    // before we knew which state we would land in:
+    var lam = relativePosition(minFeasibleQ(state, action), q, maxFeasibleQ(state, action)); 
+    // (this is between 0 and 1 by definition of q.)
+
+    // rescale the target to the feasibility interval of the state that we landed in:
+    var rescaledAleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
+    // (only this part preserves aspiration in expectation)
+
+    return interpolate(steadfastAleph4nextState, rescalingDegree, rescaledAleph4nextState);
+  });
+
+  // some more safety criteria:
+
+  // Shannon entropy relative to uninformedPolicy:
+  var entropy = dp.cache(function(state, aleph) {
+    var localPolicy = getLocalPolicy(state, aleph),
+        res = expectation(Infer({ model() {
+          var action = sample(localPolicy),
+              e = uninformedPolicy(state).score(action) - localPolicy.score(action);
+          if (state.terminateAfterAction){
+            return e;
+          } else {
+            var nextState = transition(state, action),
+                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
+            return e + entropy(nextState, nextAleph);
+          }
+        }}));
+    return res;
+  });
+  var entropyAction = dp.cache(function(state, p, action, aleph) {
+    var res = expectation(Infer({ model() {
+          var e = uninformedPolicy(state).score(action) - Math.log(p);
+          if (state.terminateAfterAction){
+            return e;
+          } else {
+            var nextState = transition(state, action),
+                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
+            return e + entropy(nextState, nextAleph);
+          }
+        }}));
+    return res;
+  });
+
+  var KLdiv = dp.cache(function(state, aleph) {
+    var localPolicy = getLocalPolicy(state, aleph),
+        ref = refPolicy(state),
+        res = expectation(Infer({ model() {
+          var action = sample(localPolicy),
+              d = localPolicy.score(action) - ref.score(action);
+          if (state.terminateAfterAction){
+            return d;
+          } else {
+            var nextState = transition(state, action),
+                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
+            return d + KLdiv(nextState, nextAleph);
+          }
+        }}));
+    return res;
+  });
+  var KLdivAction = dp.cache(function(state, p, action, aleph) {
+    var ref = refPolicy(state),
+        res = expectation(Infer({ model() {
+          var d = Math.log(p) - ref.score(action);
+          if (state.terminateAfterAction){
+            return d;
+          } else {
+            var nextState = transition(state, action),
+                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
+            return d + KLdiv(nextState, nextAleph);
+          }
+        }}));
+    return res;
+  });
+
+  var getLoss = dp.cache(function(state, a, aleph, v, q, p) { 
+    var q2 = Q2(state, a, aleph), variance = q2 - Math.pow(q,2);
+    return lossCoeff4variance * (variance + Math.pow(q - v,2)) 
+        + lossCoeff4KLdiv * KLdivAction(state, p, a, aleph) 
+        + lossCoeff4entropy * entropyAction(state, p, a, aleph)
+        + lossCoeff4random * Math.random();
+  });
+
+  return { 
+    getLocalPolicy: getLocalPolicy, propagateAspiration: propagateAspiration, 
+    getAspiration4action: getAspiration4action, getAspiration4state: getAspiration4state, 
+    Q: Q, V: V, Q2: Q2, V2: V2, 
+    minFeasibleQ: minFeasibleQ, maxFeasibleQ: maxFeasibleQ, 
+    minFeasibleV: minFeasibleV, maxFeasibleV: maxFeasibleV,
+    entropy: entropy, KLdiv: KLdiv
+  };
+};
+
+
+// Auxiliary functions:
+
+var asInterval = function(x) { return _.isArray(x) ? x : [x,x]; };
+var interpolate = function(x, lam, y) {
+  // this is denoted  x : lam : y  in formulas
+if (_.isArray(x) || _.isArray(lam) || _.isArray(y)) {
+    // one argument is an interval, so everything becomes an interval:
+    var xx = asInterval(x), lamlam = asInterval(lam), yy = asInterval(y);
+    return [xx[0] + lamlam[0] * (yy[0] - xx[0]), 
+            xx[1] + lamlam[1] * (yy[1] - xx[1])];
+  } else {
+    return x + lam * (y - x);
+  }
+}
+var relativePosition = function(x, z, y) {
+  // this is denoted  x \ z \ y  in formulas
+if (_.isArray(x) || _.isArray(z) || _.isArray(y)) {
+    // one argument is an interval, so everything becomes an interval:
+    var xx = asInterval(x), zz = asInterval(z), yy = asInterval(y);
+    return [yy[0] != xx[0] ? (zz[0] - xx[0]) / (yy[0] - xx[0]) : 0.5, 
+            yy[1] != xx[1] ? (zz[1] - xx[1]) / (yy[1] - xx[1]) : 0.5];
+  } else {
+    return y != x ? (z - x) / (y - x) : 0.5;
+  }
+}
+var clip = function(x, z, y) {
+  // this is denoted  x[ z ]y  in formulas
+if (_.isArray(x) || _.isArray(z) || _.isArray(y)) {
+    // one argument is an interval, so everything becomes an interval:
+    var xx = asInterval(x), zz = asInterval(z), yy = asInterval(y);
+    return [Math.min(Math.max(xx[0], zz[0]), yy[0]),
+            Math.min(Math.max(xx[1], zz[1]), yy[1])];
+  } else {
+    return Math.min(Math.max(x, z), y);
+  }
+}
+var intersect = function(interval1, interval2) {
+  // do the two intervals intersect in at least one point?
+  return (interval1[0] <= interval2[1]) && (interval2[0] <= interval1[1]);
+}
+
+

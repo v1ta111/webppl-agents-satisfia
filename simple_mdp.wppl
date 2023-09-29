@@ -22,84 +22,27 @@ var options = extend({
     }, _argv),
     aleph0 = typeof(options.aleph0Lo) === 'undefined' ? options.aleph0 : [options.aleph0Lo, options.aleph0Hi];
 
-// fold: Restaurant constants, tableToUtilityFunction
+// hand-coded world:
 
-var ___ = ' ';
-var DN = { name : 'Donut N' };
-var DS = { name : 'Donut S' };
-var V = { name : 'Veg' };
-var N = { name : 'Noodle' };
-
-var tableToIndicatorIncrementFct = function(table, feature) {
-  return function(state, action) {
-    var f = feature(state), stateFeatureName = f.name, inc = stateFeatureName ? table[stateFeatureName] : table[f['0']];
-    return inc;
-  };
+var startState = {name: '0', terminateAfterAction: false};
+var stateToActions = function(state) {
+  return ['pass'];
 };
-// 
-
-// Construct world 
-
-var grid = [
-  ['#', '#', '#', '#',  V , '#'],
-  ['#', '#', '#', ___, ___, ___],
-  ['#', '#', DN , 's', '#', ___],
-  ['#', '#', '#', 's', '#', ___],
-  ['#', '#', '#', ___, ___, ___],
-  ['#', '#', '#', ___, '#',  N ],
-  [___, ___, ___, ___, '#', '#'],
-  [DS , '#', '#', ___, '#', '#']
-];
-
-var mdp = makeGridWorldMDP({
-  grid,
-  start: [3, 1],
-  totalTime: 9
-});
-
-var world = mdp.world;
-var transition = world.transition;
-var stateToActions = world.stateToActions;
-
-
-// Specify distribution of indicator increments (via expected value and variancs) 
-// (Note: under a "maximization" paradigm, this would be called "reward" or "utility")
-
-var expectedIndicatorIncrementTable = {
-  'Donut S': 1,
-  'Donut N': 1,
-  'Veg': 3,
-  'Noodle': 2,
-  's': -0.3, // sand roads take time
-  ' ': -0.1
-};
-var varianceOfIndicatorIncrementTable = {
-  'Donut S': 0,
-  'Donut N': 0,
-  'Veg': 0,
-  'Noodle': 0,
-  's': 0, // sand roads are free
-  ' ': 0.01 // normal roads might have traffic jams
-};
-
-var f0 = world.feature, feature = function(s) {return extend(f0(s), {test: "hello"})};
-
-var expectedIndicatorIncrement = tableToIndicatorIncrementFct(expectedIndicatorIncrementTable, feature),
-    varianceOfIndicatorIncrement = tableToIndicatorIncrementFct(varianceOfIndicatorIncrementTable, feature); 
-
-// uninformedP policy for use in Shannon entropy: 
-var uninformedPolicy = function(state) {
-  return Categorical({vs: ["u", "d", "l", "r"], ps: [0.25, 0.25, 0.25, 0.25]});
+var transition = function(state, action) {
+  return state == startState ? {name: '1', terminateAfterAction: true} : startState; 
 }
-// (Note: when refining an action a into variants a', a'', 
-// the probabilities of a under uninformedPolicy should split into two parts for a' and a'' additively,
-// since then behavior remains consistent. In particular, if an action is cloned and its uninformedPolicy 
-// probability is split somehow, behavior should remain invariant.)
-
-// Reference policy for use in KL divergence
-// (can be used to steer agent towards certain actions):
+var expectedIndicatorIncrement = function(state, action) {
+  return state == startState ? 0 : 1;
+};  
+var varianceOfIndicatorIncrement = function(state, action) {
+  return state == startState ? 0 : 1;
+};  
+var world = { stateToActions, transition }, mdp = { world, startState };
 var refPolicy = function(state) { 
-  return Categorical({vs: ["u", "d", "l", "r"], ps: [0.7, 0.1, 0.1, 0.1]}); 
+  return Categorical({vs: ['pass'], ps: [1.0]}); 
+};
+var uninformedPolicy = function(state) { 
+  return Categorical({vs: ['pass'], ps: [1.0]}); 
 };
 
 // initialize the agent
@@ -161,21 +104,7 @@ console.log("KL divergence from reference policy is", KLdiv(mdp.startState, alep
 
 // simulate and show a single trajectory:
 var out = simulate(mdp.startState, aleph0);
-if (inBrowser) {
-  viz.gridworld(world, { trajectory: map(first, out.trajectory) })
-} else {
-  // make ascii art visualization of trajectory
-  var f = world.features, h = f.length, w = f[0].length, ys = _.range(h).reverse(), xs = _.range(w).reverse();
-  map(function(y) { 
-    var char = function(x, text) { 
-      var sas = filter(function(sa) {return sa[0].loc[0] == x && sa[0].loc[1] == y}, out.trajectory),
-          g = grid[y][x],
-          char = sas.length > 0 ? sas[0][1] : _.isString(g) ? g : '$';
-      return text + char + " ";
-    };
-    console.log(reduce(char, "", xs));
-  }, ys);
-}
+console.log("trajectory", out.trajectory);
 
 // Define the filename for the JSON file
 var filename = 'output.json';
