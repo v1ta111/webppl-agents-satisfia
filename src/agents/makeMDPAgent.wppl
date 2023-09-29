@@ -146,6 +146,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     lossCoeff4variance: 1.0, // weight of variance in loss function, must be >= 0
     lossCoeff4entropy: 0.0, // weight of entropy in loss function, must be >= 0
     lossCoeff4KLdiv: 0.0, // weight of KL divergence in loss function, must be >= 0
+    lossCoeff4feasibilityPower: 0.0, // weight of power of squared feasibility interval width in loss function, must be >= 0
     lossCoeff4otherLoss: 0.0, // weight of other loss components specified by otherLossIncrement, must be >= 0
     lossCoeff4random: 0.0, // weight of random noise in loss function, must be >= 0
     onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
@@ -166,6 +167,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       lossCoeff4variance = params.lossCoeff4variance,
       lossCoeff4entropy = params.lossCoeff4entropy,
       lossCoeff4KLdiv = params.lossCoeff4KLdiv,
+      lossCoeff4feasibilityPower = params.lossCoeff4feasibilityPower,
       lossCoeff4otherLoss = params.lossCoeff4otherLoss,
       lossCoeff4random = params.lossCoeff4random,
       otherLossIncrement = params.otherLossIncrement,
@@ -335,7 +337,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     if (debug) console.log("  Q2", state, action, aleph);
     return expectation(Infer({ model() {
       var r = expectedIndicatorIncrement(state, action),
-          r2 = Math.pow(r,2) + varianceOfIndicatorIncrement(state, action);
+          r2 = squared(r) + varianceOfIndicatorIncrement(state, action);
       if (state.terminateAfterAction){
         return r2;
       } else {
@@ -383,10 +385,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
   // (actually, negative KL divergence relative to uninformedPolicy (e.g., a uniform distribution),
   // to be consistent under action cloning or action refinement):
   var entropy = dp.cache(function(state, aleph) {
-    var localPolicy = getLocalPolicy(state, aleph), ref = refPolicy(state);
+    var localPolicy = getLocalPolicy(state, aleph);
     return expectation(Infer({ model() { 
       var action = sample(localPolicy);
-      return entropyAction(state, Math.exp(ref.score(action)), action, aleph);
+      return entropyAction(state, Math.exp(localPolicy.score(action)), action, aleph);
     }}));
   });
   var entropyAction = dp.cache(function(state, actionProbability, action, aleph) {
@@ -406,7 +408,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   // KL divergence relative to refPolicy:
   var KLdiv = dp.cache(function(state, aleph) {
-    var localPolicy = getLocalPolicy(state, aleph), ref = refPolicy(state);
+    var localPolicy = getLocalPolicy(state, aleph);
     return expectation(Infer({ model() { 
       var action = sample(localPolicy);
       return KLdivAction(state, Math.exp(localPolicy.score(action)), action, aleph);
@@ -448,10 +450,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
   });
 
   var getLoss = dp.cache(function(state, action, aleph, v, q, actionProbability) { 
-    var q2 = Q2(state, action, aleph), variance = q2 - Math.pow(q,2);
-    return lossCoeff4variance * (variance + Math.pow(q - v,2)) 
+    var q2 = Q2(state, action, aleph), variance = q2 - squared(q);
+    return lossCoeff4variance * (variance + squared(q - v)) 
             + (lossCoeff4KLdiv > 0 ? lossCoeff4KLdiv * KLdivAction(state, actionProbability, action, aleph) : 0) 
             + (lossCoeff4entropy > 0 ? lossCoeff4entropy * entropyAction(state, actionProbability, action, aleph) : 0)
+            + (lossCoeff4feasibilityPower > 0 ? lossCoeff4feasibilityPower * squared(maxFeasibleQ(state, action) - minFeasibleQ(state, action)) : 0)
             + (otherLossIncrement && (lossCoeff4otherLoss > 0) ? lossCoeff4otherLoss * otherLossAction(state, action, aleph) : 0)
             + (lossCoeff4random > 0 ? lossCoeff4random * Math.random() : 0);
   });
@@ -510,3 +513,5 @@ var intersect = function(interval1, interval2) {
   // do the two intervals intersect in at least one point?
   return (interval1[0] <= interval2[1]) && (interval2[0] <= interval1[1]);
 }
+
+var squared = function(x) { return Math.pow(x, 2); };

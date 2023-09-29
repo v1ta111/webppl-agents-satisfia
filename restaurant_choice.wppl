@@ -119,12 +119,10 @@ var getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagate
 // Generate and draw a trajectory:
 var simulate = function(state, aleph) {
   if (options.debug) console.log("simulate", state, aleph);
-  var localPolicy = getLocalPolicy(state, aleph);
-  var action = sample(localPolicy);
-  var r = expectedIndicatorIncrement(state, action),
-      r2 = Math.pow(r,2) + varianceOfIndicatorIncrement(state, action);
-  var nextState = transition(state, action);
-  var nextAleph = propagateAspiration(state, aleph, action, r, nextState);
+  var localPolicy = getLocalPolicy(state, aleph),
+      action = sample(localPolicy),
+      r = expectedIndicatorIncrement(state, action),
+      r2 = squared(r) + varianceOfIndicatorIncrement(state, action);
   var sa = [state, action];
   if (state.terminateAfterAction) {
     return { 
@@ -133,7 +131,9 @@ var simulate = function(state, aleph) {
       conditionalExpectedSquaredIndicator: r2 // expected squared indicator conditional on this trajectory
     };
   } else {
-    var nextOut = simulate(nextState, nextAleph);
+    var nextState = transition(state, action),
+        nextAleph = propagateAspiration(state, aleph, action, r, nextState),
+        nextOut = simulate(nextState, nextAleph);
     return { 
       trajectory: [sa].concat(nextOut.trajectory), 
       conditionalExpectedIndicator: r + nextOut.conditionalExpectedIndicator,

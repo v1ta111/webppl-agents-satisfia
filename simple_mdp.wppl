@@ -13,38 +13,97 @@ var params = extend({
     lossCoeff4random: 0.0, // weight of random noise in loss function, must be >= 0
     onlyUseClosestActions: false, // if true, only use the two actions that are closest to the target aspiration in expectation
     softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
-*/
     rescalingDegree: 0.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
-  }, _argv);
+*/
+}, _argv);
 
 // simulation options:
 var options = extend({
-      aleph0: [1.2,1.4], // initial global aspiration (desired expected return);
-      debug: true, // if true, print debug messages
+      pPotHiEasy: 0.99, // probability of potting a ball if in easy position and focusing on potting
+      pPotMidEasy: 0.97, // probability of potting a ball if in easy position and not focusing on anything
+      pPotLoEasy: 0.96, // probability of potting a ball if in easy position and focusing on continuation
+      pPotHiHard: 0.90, // probability of potting a ball if in hard position and focusing on potting
+      pPotMidHard: 0.86, // probability of potting a ball if in hard position and not focusing on anything
+      pPotLoHard: 0.84, // probability of potting a ball if in hard position and focusing on continuation
+      pEasyHiEasy: 0.90, // probability of getting an easy position if in easy position and focusing on continuation
+      pEasyMidEasy: 0.80, // probability of getting an easy position if in easy position and not focusing on anything
+      pEasyLoEasy: 0.75, // probability of getting an easy position if in easy position and focusing on potting
+      pEasyHiHard: 0.80, // probability of getting an easy position if in hard position and focusing on continuation
+      pEasyMidHard: 0.70, // probability of getting an easy position if in hard position and not focusing on anything
+      pEasyLoHard: 0.65, // probability of getting an easy position if in hard position and focusing on potting
+      aleph0: [0.8, 0.9], // initial global aspiration (desired expected return);
+      debug: false, // if true, print debug messages
     }, _argv),
     aleph0 = typeof(options.aleph0Lo) === 'undefined' ? options.aleph0 : [options.aleph0Lo, options.aleph0Hi];
 
 // hand-coded world:
 
-var startState = {name: '0', terminateAfterAction: false};
+var startState = {
+  code: [1, 1, 1, 1, 0],  // match, frame, visit, ball, hard to pot (0) (easy to pot is 1)
+  terminateAfterAction: false
+};
 var stateToActions = function(state) {
-  return ['pass'];
+  return [
+    '.', // don't try particularly hard
+    'p', // focus on potting
+    'c' // focus on getting a good position for continuation
+  ];
 };
 var transition = function(state, action) {
-  return state == startState ? {name: '1', terminateAfterAction: true} : startState; 
-}
+  var code = state.code,
+      match = code[0], // matches 1+2 are the group phase, 3 is the semifinals, 4 is the finals 
+      frame = code[1], // a match consists of at most 2 frames
+      visit = code[2], // a frame consists of at most 2 visits
+      ball = code[3], // in each visit, the player first attempts to pot a red (1) and then the black (2) 
+      easy = (code[4]==1);
+  var potted = sample(Bernoulli({
+        p: action == 'p' ? (easy ? options.pPotHiEasy : options.pPotHiHard) // if focusing on potting, potting is more likely 
+          : action == '.' ? (easy ? options.pPotMidEasy : options.pPotMidHard) // if not focusing on anything, potting is less likely
+          : (easy ? options.pPotLoEasy : options.pPotLoHard) // if focusing on continuation, potting is least likely
+      }));
+  if (!potted) {
+    // after failing to pot some ball in the 1st visit, the 2nd visit starts:
+    if (visit == 1) return { code: [match, frame, 2, 1, 0], terminateAfterAction: false };
+    // after failing to pot some ball in the 2nd visit of some frame of the 1st match of the group phase, 
+    // that frame and thus that match is lost and the 2nd match starts:
+    if ((match == 1) && (visit == 2)) return { code: [2, 1, 1, 1, 0], terminateAfterAction: false };
+    // after failing to pot some ball in the 2nd visit of some frame of the 2nd match of the group phase 
+    // or of the semifinals or finals, that match is lost as well and the player exists the tournament:
+    return { code: 'lost', terminateAfterAction: true };
+  } else {
+    // after potting the 1st ball in some visit, the 2nd ball can be attempted:
+    if (ball == 1) {
+      var nextEasy = sample(Bernoulli({
+            p: action == 'c' ? (easy ? options.pEasyHiEasy : options.pEasyHiHard) // if focusing on continuation, the 2nd ball is more likely to be easy 
+              : action == '.' ? (easy ? options.pEasyMidEasy : options.pEasyMidHard) // if not focusing on anything, the 2nd ball is less likely to be easy 
+              : (easy ? options.pEasyLoEasy : options.pEasyLoHard) // if focusing on potting, the 2nd ball is least likely to be easy
+          }));
+      return { code: [match, frame, visit, 2, nextEasy ? 1 : 0], terminateAfterAction: false };
+    }
+    // after potting the 2nd ball in some visit in the 1st frame of a match, 
+    // that frame is won and the player made it into the 2nd frame:
+    if ((frame == 1) && (ball == 2)) return { code: [match, 2, 1, 1, 0], terminateAfterAction: false };
+    // after winning the semifinals, the player made it into the finals:
+    if ((match == 3) && (frame == 2) && (ball == 2)) return { code: [4, 1, 1, 1, 0], terminateAfterAction: false };
+    // after winning the finals, the tournament is won:
+    if ((match == 4) && (frame == 2) && (ball == 2)) return { code: 'won', terminateAfterAction: true };
+    // after winning the 2nd frame in some match in the group phase, 
+    // that match is won and the player made it into the semifinals:
+    return { code: [3, 1, 1, 1, 0], terminateAfterAction: false };
+  }
+} 
 var expectedIndicatorIncrement = function(state, action) {
-  return state == startState ? 0 : 1;
+  return state.code == 'won' ? 1 : 0;
 };  
 var varianceOfIndicatorIncrement = function(state, action) {
-  return state == startState ? 0 : 1;
+  return 0;
 };  
 var world = { stateToActions, transition }, mdp = { world, startState };
 var refPolicy = function(state) { 
-  return Categorical({vs: ['pass'], ps: [1.0]}); 
+  return Categorical({vs: ['.', 'p', 'c'], ps: [.8, .1, .1]}); 
 };
 var uninformedPolicy = function(state) { 
-  return Categorical({vs: ['pass'], ps: [1.0]}); 
+  return Categorical({vs: ['.', 'p', 'c'], ps: [1, 1, 1]}); 
 };
 
 // initialize the agent
@@ -64,21 +123,22 @@ var getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagate
 // Generate and draw a trajectory:
 var simulate = function(state, aleph) {
   if (options.debug) console.log("simulate", state, aleph);
-  var localPolicy = getLocalPolicy(state, aleph);
-  var action = sample(localPolicy);
-  var r = expectedIndicatorIncrement(state, action),
-      r2 = Math.pow(r,2) + varianceOfIndicatorIncrement(state, action);
-  var nextState = transition(state, action);
-  var nextAleph = propagateAspiration(state, aleph, action, r, nextState);
+  var localPolicy = getLocalPolicy(state, aleph),
+      action = sample(localPolicy),
+      r = expectedIndicatorIncrement(state, action),
+      r2 = squared(r) + varianceOfIndicatorIncrement(state, action);
   var sa = [state, action];
   if (state.terminateAfterAction) {
+    if (options.debug) console.log("...terminal state");
     return { 
       trajectory: [sa], // sequence of [state, action] pairs
       conditionalExpectedIndicator: r, // expected indicator conditional on this trajectory
       conditionalExpectedSquaredIndicator: r2 // expected squared indicator conditional on this trajectory
     };
   } else {
-    var nextOut = simulate(nextState, nextAleph);
+    var nextState = transition(state, action),
+        nextAleph = propagateAspiration(state, aleph, action, r, nextState),
+        nextOut = simulate(nextState, nextAleph);
     return { 
       trajectory: [sa].concat(nextOut.trajectory), 
       conditionalExpectedIndicator: r + nextOut.conditionalExpectedIndicator,
@@ -88,6 +148,7 @@ var simulate = function(state, aleph) {
 };
 
 
+/** /
 // calculate expected return and return std.dev. by using the inbuilt expectation function:
 
 var expectedIndicator = expectation(Infer({ model() {
@@ -95,40 +156,20 @@ var expectedIndicator = expectation(Infer({ model() {
 }}));
 console.log("in expectation, we desired indicator", aleph0, "and actually get", expectedIndicator);
 
+/** /
 var expectedSquaredIndicator = expectation(Infer({ model() {
   return simulate(mdp.startState, aleph0).conditionalExpectedSquaredIndicator;
 }})),
 stddev = Math.sqrt(expectedSquaredIndicator - Math.pow(expectedIndicator,2));
 console.log("indicator has a std.dev. of", stddev, 
             "which should equal", Math.sqrt(V2(mdp.startState, aleph0) - Math.pow(V(mdp.startState, aleph0),2)));
-
+/**/
 console.log("Entropy of policy is", entropy(mdp.startState, aleph0));
 console.log("KL divergence from reference policy is", KLdiv(mdp.startState, aleph0));
+/**/
+
 
 // simulate and show a single trajectory:
 var out = simulate(mdp.startState, aleph0);
 console.log("trajectory", out.trajectory);
 
-// Define the filename for the JSON file
-var filename = 'output.json';
-
-// Read existing JSON data from the file (if it exists)
-var existingData = json.read(filename) || [];
-
-// Assuming you have a single data object with keys and values
-var data1 = {
-  key1: 'expectedIndicator',
-  value1: expectedIndicator,
-  key2: 'aleph0',
-  value2: aleph0,
-  key3: 'maxLambda',
-  value3: params.maxLambda,
-  key4: 'minLambda',
-  value4: params.minLambda
-};
-
-// Add new data to the existing data
-existingData.push(data1);
-
-// Write the updated data back to the JSON file
-json.write(filename, existingData);
