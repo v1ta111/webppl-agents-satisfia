@@ -4,15 +4,17 @@ var inBrowser = typeof(argv) === 'undefined',
 
 // agent parameters:
 var params = extend({
+/*
     maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
     lossCoeff4variance: 100.0, // weight of variance in loss function, must be >= 0
     lossCoeff4KLdiv: 0.0, // weight of KL divergence in loss function, must be >= 0
     lossCoeff4entropy: 1.0, // weight of entropy in loss function, must be >= 0
     lossCoeff4random: 0.0, // weight of random noise in loss function, must be >= 0
-    onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
+    onlyUseClosestActions: false, // if true, only use the two actions that are closest to the target aspiration in expectation
     softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
-    rescalingDegree: 1.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
+*/
+    rescalingDegree: 0.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
   }, _argv);
 
 // simulation options:

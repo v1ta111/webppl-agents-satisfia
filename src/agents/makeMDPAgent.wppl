@@ -137,7 +137,22 @@ var makeMDPAgent = function(params, world) {
 
 // SatisfIA agent:
 
-var makeMDPAgentSatisfia = function(params, world) {
+var makeMDPAgentSatisfia = function(params_, world) {
+
+  // extend default parameters and options by supplied ones:
+  var params = extend(extend({
+    maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
+    minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
+    lossCoeff4variance: 1.0, // weight of variance in loss function, must be >= 0
+    lossCoeff4KLdiv: 1.0, // weight of KL divergence in loss function, must be >= 0
+    lossCoeff4entropy: 1.0, // weight of entropy in loss function, must be >= 0
+    lossCoeff4random: 1.0, // weight of random noise in loss function, must be >= 0
+    onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
+    softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
+    rescalingDegree: 1.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
+  }, params_), { options: extend({
+    debug: false
+  }, params_.options) });
 
   // extract parameters, options, and world:
   var expectedIndicatorIncrement = params.expectedIndicatorIncrement,
@@ -155,8 +170,10 @@ var makeMDPAgentSatisfia = function(params, world) {
       debug = options.debug;
   var stateToActions = world.stateToActions, transition = world.transition;
 
+  if (debug) console.log("makeMDPAgentSatisfia using parameters", params);
+
   var getLocalPolicy = dp.cache(function(state, aleph){
-    if (debug) console.log(" getLocalPolicy", state.loc, aleph);
+    if (debug) console.log(" getLocalPolicy", state, aleph);
     // The following quantities are potentially intervals: aleph, v, Qstate(a)
 
     // Use aspiration aleph to set the desired expected return for this state before (!) having chosen an action:
@@ -189,6 +206,9 @@ var makeMDPAgentSatisfia = function(params, world) {
     } else {
       
       // Use a softmax mixture of all actions, based on the safety loss.
+      // (Note: this will lead to larger entropy and will not behave as consistently under MDP refinements
+      // in which an action is resolved into a sequence of sub-actions.)
+
       // First devide actions into those that are above and below vMid:
       var actionsHi = filter(function(a) {return QstateMid(a) >= vMid}, actions),
           actionsLo = filter(function(a) {return QstateMid(a) <= vMid}, actions);
@@ -200,10 +220,13 @@ var makeMDPAgentSatisfia = function(params, world) {
       var lossHi = function(a) { return getLoss(state, a, aleph, vMid, approxQHi, approxP); },
           lossLo = function(a) { return getLoss(state, a, aleph, vMid, approxQLo, 1-approxP); };
       // Construct softmax distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo:
-      var localPolicyHi = Categorical({vs: actionsHi, 
-                                       ps: map(function(a) {return Math.exp(-softmaxInvTemp * lossHi(a))}, actionsHi)}),
+      var defaultPolicy = uninformedPolicy(state),
+          localPolicyHi = Categorical({vs: actionsHi, 
+                                       ps: map(function(a) {return Math.exp(defaultPolicy.score(a) 
+                                                            - softmaxInvTemp * lossHi(a))}, actionsHi)}),
           localPolicyLo = Categorical({vs: actionsLo,
-                                       ps: map(function(a) {return Math.exp(-softmaxInvTemp * lossLo(a))}, actionsLo)}); 
+                                       ps: map(function(a) {return Math.exp(defaultPolicy.score(a) 
+                                                            - softmaxInvTemp * lossLo(a))}, actionsLo)}); 
       // Calculate the true qHi, qLo, and p from these distributions:
       var qHi = expectation(localPolicyHi, QstateMid),
           qLo = expectation(localPolicyLo, QstateMid),
@@ -221,14 +244,14 @@ var makeMDPAgentSatisfia = function(params, world) {
   var maxFeasibleQ = dp.cache(function(state, action){
     var r = expectedIndicatorIncrement(state, action),
         q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return maxFeasibleV(transition(state, action)); }}));
-    if (debug) console.log("maxFeasibleQ", state.loc, action, q);
+    if (debug) console.log("   maxFeasibleQ", state, action, q);
     return q;
   });
   var maxFeasibleV = dp.cache(function(state){
     var actions = stateToActions(state),
         Qstate = function(a) { return maxFeasibleQ(state, a); },
         v = maxLambda == 1 ? maxWith(Qstate, actions)[1] : interpolate(minWith(Qstate, actions)[1], maxLambda, maxWith(Qstate, actions)[1]);
-    if (debug) console.log("maxFeasibleV", state.loc, v);
+    if (debug) console.log("   maxFeasibleV", state, v);
     return v;
   });
 
@@ -237,21 +260,21 @@ var makeMDPAgentSatisfia = function(params, world) {
   var minFeasibleQ = dp.cache(function(state, action){
     var r = expectedIndicatorIncrement(state, action),
         q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return minFeasibleV(transition(state, action)); }}));
-    if (debug) console.log("minFeasibleQ", state.loc, action, q);
+    if (debug) console.log("   minFeasibleQ", state, action, q);
     return q;
   });
   var minFeasibleV = dp.cache(function(state){
     var actions = stateToActions(state),
         Qstate = function(a) { return minFeasibleQ(state, a); },
         v = minLambda == 0 ? minWith(Qstate, actions)[1] : interpolate(minWith(Qstate, actions)[1], minLambda, maxWith(Qstate, actions)[1]);
-    if (debug) console.log("minFeasibleV", state.loc, v);
+    if (debug) console.log("   minFeasibleV", state, v);
     return v;
   });
 
   // When using action in state, we can get any expected return in the interval
   // [minFeasibleQ(state, action), maxFeasibleQ(state, action)].
   var getAspiration4action = dp.cache(function(state, action, aleph4state){
-    if (debug) console.log("  getAspiration4action", state.loc, action, aleph4state)
+    if (debug) console.log("  getAspiration4action", state, action, aleph4state)
     var qLo = minFeasibleQ(state, action),
         qHi = maxFeasibleQ(state, action);
     if (!_.isArray(aleph4state)) {
@@ -274,13 +297,13 @@ var makeMDPAgentSatisfia = function(params, world) {
   // we adjust our aspiration to aleph clipped to that interval:
   var getAspiration4state = dp.cache(function(state, propagatedAleph){
     var res = clip(minFeasibleV(state), propagatedAleph, maxFeasibleV(state));
-    if (debug) console.log("  getAspiration4state", state.loc, propagatedAleph, res);
+    if (debug) console.log("  getAspiration4state", state, propagatedAleph, res);
     return res;
   });
 
   // Actual Q and V functions of resulting policy:
   var Q = dp.cache(function(state, action, aleph){
-    if (debug) console.log("  Q", state.loc, action, aleph);
+    if (debug) console.log("  Q", state, action, aleph);
     return expectation(Infer({ model() {
       var r = expectedIndicatorIncrement(state, action);
       if (state.terminateAfterAction){
@@ -293,13 +316,13 @@ var makeMDPAgentSatisfia = function(params, world) {
     }}));
   });
   var V = dp.cache(function(state, aleph){
-    if (debug) console.log(" V", state.loc, aleph);
+    if (debug) console.log("  V", state, aleph);
     return expectation(Infer({ model() { return Q(state, sample(getLocalPolicy(state, aleph)), aleph); }}));
   });
 
   // Expected squared return, for computing the variance of return:
   var Q2 = dp.cache(function(state, action, aleph){
-    if (debug) console.log("  Q2", state.loc, action, aleph);
+    if (debug) console.log("  Q2", state, action, aleph);
     return expectation(Infer({ model() {
       var r = expectedIndicatorIncrement(state, action),
           r2 = Math.pow(r,2) + varianceOfIndicatorIncrement(state, action);
@@ -313,12 +336,12 @@ var makeMDPAgentSatisfia = function(params, world) {
     }}));
   });
   var V2 = dp.cache(function(state, aleph){
-    if (debug) console.log(" V2", state.loc, aleph);
+    if (debug) console.log("  V2", state, aleph);
     return expectation(Infer({ model() { return Q2(state, sample(getLocalPolicy(state, aleph)), aleph); }}));
   });
 
   var propagateAspiration = dp.cache(function(state, aleph4state, action, r, nextState){
-    if (debug) console.log(" propagateAspiration", state.loc, aleph4state, action, r, nextState.loc);
+    if (debug) console.log(" propagateAspiration", state, aleph4state, action, r, nextState);
 
     // the propagated aspiration is a mixture of a steadfast and a rescaled part:
 
