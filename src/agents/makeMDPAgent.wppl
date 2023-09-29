@@ -349,23 +349,22 @@ var makeMDPAgentSatisfia = function(params_, world) {
           ? [aleph4state[0] - indicatorIncrement, aleph4state[1] - indicatorIncrement] 
           : aleph4state - indicatorIncrement;
 
-    // recover the aspiration that we had after choosing action, before knowing which state we would land in:
-    // (Note: We have E(q | action ~ localPolicy) = v) by construction of localPolicy in getLocaPolicy().)
-    var q = getAspiration4action(state, action, aleph4state);
-    // compute the relative position of that target in the expectation that we had of 
-    //    r plus next feasibility interval 
-    // before we knew which state we would land in:
-    var lam = rescalingDegree > 0.0 
-              ? relativePosition(minFeasibleQ(state, action), q, maxFeasibleQ(state, action)) 
-              : undefined; 
-    // (this is between 0 and 1 by definition of q.)
-    // rescale the target to the feasibility interval of the state that we landed in:
-    var rescaledAleph4nextState = rescalingDegree > 0.0
-                                  ? interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState))
-                                  : steadfastAleph4nextState;
-    // (only this part preserves aspiration in expectation)
-
-    return interpolate(steadfastAleph4nextState, rescalingDegree, rescaledAleph4nextState);
+    if (rescalingDegree == 0.0) {
+      return steadfastAleph4nextState;
+    } else {
+      // recover the aspiration that we had after choosing action, before knowing which state we would land in:
+      // (Note: We have E(q | action ~ localPolicy) = v) by construction of localPolicy in getLocaPolicy().)
+      var q = getAspiration4action(state, action, aleph4state);
+      // compute the relative position of that target in the expectation that we had of 
+      //    r plus next feasibility interval 
+      // before we knew which state we would land in:
+      var lam = relativePosition(minFeasibleQ(state, action), q, maxFeasibleQ(state, action)); 
+      // (this is between 0 and 1 by definition of q.)
+      // rescale the target to the feasibility interval of the state that we landed in:
+      var rescaledAleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
+      // (only this part preserves aspiration in expectation)
+      return interpolate(steadfastAleph4nextState, rescalingDegree, rescaledAleph4nextState);      
+    }
   });
 
   // some more safety criteria:
