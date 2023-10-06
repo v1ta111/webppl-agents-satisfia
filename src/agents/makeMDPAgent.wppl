@@ -137,6 +137,11 @@ var makeMDPAgent = function(params, world) {
 
 // SatisfIA agent:
 
+/* TODO:
+- rename parameters to match internal naming
+- rename increment to delta and indicator to total
+*/
+
 var makeMDPAgentSatisfia = function(params_, world) {
 
   // extend default parameters and options by supplied ones:
@@ -144,6 +149,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
     lossCoeff4variance: 1.0, // weight of variance in loss function, must be >= 0
+    lossCoeff4MP: 0.0, // weight of messing potential in loss function, must be >= 0
     lossCoeff4entropy: 0.0, // weight of entropy in loss function, must be >= 0
     lossCoeff4KLdiv: 0.0, // weight of KL divergence in loss function, must be >= 0
     lossCoeff4feasibilityPower: 0.0, // weight of power of squared feasibility interval width in loss function, must be >= 0
@@ -158,19 +164,21 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   // extract parameters, options, and world:
   var stateToActions = world.stateToActions, transition = world.transition;
-  var expectedIndicatorIncrement = params.expectedIndicatorIncrement,
-      varianceOfIndicatorIncrement = params.varianceOfIndicatorIncrement,
+  var expectedDelta = params.expectedIndicatorIncrement,
+      varianceOfDelta = params.varianceOfIndicatorIncrement,
       minLambda = params.minLambda, maxLambda = params.maxLambda,
+      uninformedStatePriorScore = params.uninformedStatePriorScore,
       uninformedPolicy = params.uninformedPolicy,
       refPolicy = params.refPolicy,
       internalEntropy = params.internalEntropy,
       lossCoeff4variance = params.lossCoeff4variance,
+      lossCoeff4MP = params.lossCoeff4MP,
       lossCoeff4entropy = params.lossCoeff4entropy,
       lossCoeff4KLdiv = params.lossCoeff4KLdiv,
       lossCoeff4feasibilityPower = params.lossCoeff4feasibilityPower,
       lossCoeff4otherLoss = params.lossCoeff4otherLoss,
       lossCoeff4random = params.lossCoeff4random,
-      otherLossIncrement = params.otherLossIncrement,
+      otherLocalLoss = params.otherLossIncrement,
       onlyUseClosestActions = params.onlyUseClosestActions,
       softmaxInvTemp = params.softmaxInvTemp,
       rescalingDegree = params.rescalingDegree;
@@ -259,7 +267,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
   // or of the LRA-based problem (if maxLambda<1):
   var maxFeasibleQ = dp.cache(function(state, action){
-    var r = expectedIndicatorIncrement(state, action),
+    var r = expectedDelta(state, action),
         q = state.terminateAfterAction ? r : r + expectation(Infer({ model() { return maxFeasibleV(transition(state, action)); }}));
     if (debug) console.log("   maxFeasibleQ", state, action, q);
     return q;
@@ -275,7 +283,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   // Compute the Q and V functions of the corresponding minimization (!) problem (if minLambda==0)
   // or of the LRA-based problem (if minLambda>0):
   var minFeasibleQ = dp.cache(function(state, action){
-    var r = expectedIndicatorIncrement(state, action),
+    var r = expectedDelta(state, action),
         q = state.terminateAfterAction 
             ? r 
             : r + expectation(Infer({ model() { return minFeasibleV(transition(state, action)); }}));
@@ -326,7 +334,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   var Q = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q", state, action, aleph);
     return expectation(Infer({ model() {
-      var r = expectedIndicatorIncrement(state, action);
+      var r = expectedDelta(state, action);
       if (state.terminateAfterAction){
         return r;
       } else {
@@ -345,8 +353,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
   var Q2 = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q2", state, action, aleph);
     return expectation(Infer({ model() {
-      var r = expectedIndicatorIncrement(state, action),
-          r2 = squared(r) + varianceOfIndicatorIncrement(state, action);
+      var r = expectedDelta(state, action),
+          r2 = squared(r) + varianceOfDelta(state, action);
       if (state.terminateAfterAction){
         return r2;
       } else {
@@ -390,40 +398,41 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   // other safety criteria:
 
-  // Shannon entropy 
+  // Shannon entropy of behavior
   // (actually, negative KL divergence relative to uninformedPolicy (e.g., a uniform distribution),
   // to be consistent under action cloning or action refinement):
-  var entropy = dp.cache(function(state, aleph) {
+  var behaviorEntropy = dp.cache(function(state, aleph) {
     var localPolicy = getLocalPolicy(state, aleph);
     return expectation(Infer({ model() { 
       var action = sample(localPolicy);
-      return entropyAction(state, Math.exp(localPolicy.score(action)), action, aleph);
+      return behaviorEntropy_action(state, Math.exp(localPolicy.score(action)), action, aleph);
     }}));
   });
-  var entropyAction = dp.cache(function(state, actionProbability, action, aleph) {
+  var behaviorEntropy_action = dp.cache(function(state, actionProbability, action, aleph) {
     var res = expectation(Infer({ model() {
-          var e = uninformedPolicy(state).score(action) - Math.log(actionProbability)
+          var e = (uninformedPolicy ? uninformedPolicy(state).score(action) : 0) 
+                  - Math.log(actionProbability)
                   + (internalEntropy ? internalEntropy(state, action) : 0);
           if (state.terminateAfterAction){
             return e;
           } else {
             var nextState = transition(state, action),
-                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
-            return e + entropy(nextState, nextAleph);
+                nextAleph = propagateAspiration(state, aleph, action, expectedDelta(state, action), nextState);
+            return e + behaviorEntropy(nextState, nextAleph);
           }
         }}));
     return res;
   });
 
-  // KL divergence relative to refPolicy:
-  var KLdiv = dp.cache(function(state, aleph) {
+  // KL divergence of behavior relative to refPolicy:
+  var behaviorKLdiv = dp.cache(function(state, aleph) {
     var localPolicy = getLocalPolicy(state, aleph);
     return expectation(Infer({ model() { 
       var action = sample(localPolicy);
-      return KLdivAction(state, Math.exp(localPolicy.score(action)), action, aleph);
+      return behaviorKLdiv_action(state, Math.exp(localPolicy.score(action)), action, aleph);
     }}));
   });
-  var KLdivAction = dp.cache(function(state, actionProbability, action, aleph) {
+  var behaviorKLdiv_action = dp.cache(function(state, actionProbability, action, aleph) {
     var ref = refPolicy(state),
         res = expectation(Infer({ model() {
           var d = Math.log(actionProbability) - ref.score(action);
@@ -431,27 +440,59 @@ var makeMDPAgentSatisfia = function(params_, world) {
             return d;
           } else {
             var nextState = transition(state, action),
-                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
-            return d + KLdiv(nextState, nextAleph);
+                nextAleph = propagateAspiration(state, aleph, action, expectedDelta(state, action), nextState);
+            return d + behaviorKLdiv(nextState, nextAleph);
           }
         }}));
     return res;
   });
 
-  // otherLoss:
+  // state's messing potential (maximal entropy (relative to some uninformedStatePrior) 
+  // over trajectories any agent could produce from here):
+  // TODO: also add internal entropy here?
+  var messingPotential = dp.cache(function(state) {
+    // FIXME: this can probably be simplified tremendously. I think the expectation is equal to the log of the normalization constant of maxMPpolicy, or its negative:
+    var actions = stateToActions(state),
+        weights = map(function(a) { return Math.exp(messingPotential_action(state, a)); }, actions),
+        maxMPpolicy = Categorical({vs: actions, ps: weights});
+    var MP = expectation(Infer({ model() {
+              var action = sample(maxMPpolicy); 
+              return messingPotential_action(state, action) - maxMPpolicy.score(action); 
+          }}));
+    return MP;
+  });
+  var messingPotential_action = dp.cache(function(state, action) {
+    var res = expectation(Infer({ model() {
+          if (state.terminateAfterAction){
+            return 0;
+          } else {
+            var nextState = transition(state, action),
+                nextStateScore = transitionDistribution(state, action).score(nextState),
+                nextMP = messingPotential(nextState);
+            return nextMP + (uninformedStatePriorScore ? uninformedStatePriorScore(state) : 0) - nextStateScore;
+          }
+        }}));
+    return res;
+  });
+  // TODO: later the following should actually be provided by the env/world:
+  var transitionDistribution = dp.cache(function(state, action) {
+    return Infer({ model() {return transition(state, action); }});
+  });
+
+  // other loss:
   var otherLoss = dp.cache(function(state, aleph) {
     var localPolicy = getLocalPolicy(state, aleph);
-    return expectation(Infer({ model() { return otherLossAction(state, sample(localPolicy), aleph) }}));
+    return expectation(Infer({ model() { return otherLoss_action(state, sample(localPolicy), aleph) }}));
   });
-  var otherLossAction = dp.cache(function(state, action, aleph) {
+  var otherLoss_action = dp.cache(function(state, action, aleph) {
     var ref = refPolicy(state),
         res = expectation(Infer({ model() {
-          var d = otherLossIncrement(state, action);
+          var d = otherLocalLoss(state, action);
           if (state.terminateAfterAction){
             return d;
           } else {
             var nextState = transition(state, action),
-                nextAleph = propagateAspiration(state, aleph, action, expectedIndicatorIncrement(state, action), nextState);
+                nextAleph = propagateAspiration(state, aleph, action, expectedDelta(state, action), nextState);
             return d + otherLoss(nextState, nextAleph);
           }
         }}));
@@ -460,19 +501,23 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   var getLoss = dp.cache(function(state, action, aleph, v, q, actionProbability) { 
     var q2 = Q2(state, action, aleph), variance = q2 - squared(q);
-    return lossCoeff4variance * (variance + squared(q - v)) 
-            + (lossCoeff4KLdiv > 0 ? lossCoeff4KLdiv * KLdivAction(state, actionProbability, action, aleph) : 0) 
-            + (lossCoeff4entropy > 0 ? lossCoeff4entropy * entropyAction(state, actionProbability, action, aleph) : 0)
+    return lossCoeff4variance * (variance + squared(q - v))
+            + (lossCoeff4MP > 0 ? lossCoeff4MP * messingPotential_action(state, action) : 0)
+            + (lossCoeff4KLdiv > 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(state, actionProbability, action, aleph) : 0) 
+            + (lossCoeff4entropy > 0 ? lossCoeff4entropy * behaviorEntropy_action(state, actionProbability, action, aleph) : 0)
             + (lossCoeff4feasibilityPower > 0 ? lossCoeff4feasibilityPower * squared(maxFeasibleQ(state, action) - minFeasibleQ(state, action)) : 0)
-            + (otherLossIncrement && (lossCoeff4otherLoss > 0) ? lossCoeff4otherLoss * otherLossAction(state, action, aleph) : 0)
+            + (otherLocalLoss && (lossCoeff4otherLoss > 0) ? lossCoeff4otherLoss * otherLoss_action(state, action, aleph) : 0)
             + (lossCoeff4random > 0 ? lossCoeff4random * Math.random() : 0);
   });
 
   return { 
+    // TODO: rename fields to match internal names (breaking change!)
     minFeasibleQ, maxFeasibleQ, minFeasibleV, maxFeasibleV,
     getLocalPolicy, propagateAspiration, getAspiration4action, getAspiration4state, 
     Q, V, Q2, V2, 
-    entropy, entropyAction, KLdiv, KLdivAction, otherLoss, otherLossAction, 
+    messingPotential, messingPotential_action,
+    entropy: behaviorEntropy, entropyAction: behaviorEntropy_action, 
+    KLdiv: behaviorKLdiv, KLdivAction: behaviorKLdiv_action, otherLoss, otherLossAction: otherLoss_action, 
     getLoss
   };
 };
