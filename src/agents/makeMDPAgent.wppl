@@ -177,7 +177,14 @@ var makeMDPAgentSatisfia = function(params_, world) {
   var options = params.options, 
       debug = options.debug;
 
-  // TODO: validate parameter values through assertions
+  assert.ok(lossCoeff4variance >= 0, "lossCoeff4variance must be >= 0");
+  assert.ok(lossCoeff4entropy >= 0, "lossCoeff4entropy must be >= 0");
+  assert.ok(lossCoeff4KLdiv >= 0, "lossCoeff4KLdiv must be >= 0");
+  assert.ok(lossCoeff4feasibilityPower >= 0, "lossCoeff4feasibilityPower must be >= 0");
+  assert.ok(lossCoeff4otherLoss >= 0, "lossCoeff4otherLoss must be >= 0");
+  assert.ok(lossCoeff4random >= 0, "lossCoeff4random must be >= 0");
+  assert.ok(softmaxInvTemp > 0, "softmaxInvTemp must be > 0");
+  assert.ok(0 <= rescalingDegree <= 1, "rescalingDegree must be in 0...1");
 
   if (debug) console.log("makeMDPAgentSatisfia using parameters", params);
 
@@ -192,6 +199,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // Meet point v or midpoint of interval v with a mixture of at most two actions:
     var vMid = _.isArray(v) ? (v[0] + v[1]) / 2 : v,
         QstateMid = _.isArray(v) ? function(a) { var q = Qstate(a); return (q[0] + q[1]) / 2; } : Qstate;
+
+    // TODO: make closest and softmax independent:
 
     if (onlyUseClosestActions) {
       
