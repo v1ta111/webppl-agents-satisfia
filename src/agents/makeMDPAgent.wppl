@@ -225,8 +225,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
       // From those actions that meet these values, choose a pair that optimizes 
       // an additional safety criterion encoded in a loss function (see below):
-      var lossHi = function(action) { return getLoss(state, action, aleph, vMid, qHi, probHi); },
-          lossLo = function(action) { return getLoss(state, action, aleph, vMid, qLo, 1-probHi); },
+      var lossHi = function(action) { return combinedLoss(state, action, aleph, vMid, qHi, probHi); },
+          lossLo = function(action) { return combinedLoss(state, action, aleph, vMid, qLo, 1-probHi); },
           actionHi = minWith(lossHi, actionsHi)[0],
           actionLo = minWith(lossLo, actionsLo)[0];
       return Categorical({ps: [probHi, 1 - probHi], vs: [actionHi, actionLo]});
@@ -245,8 +245,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
           approxQLo = expectation(Infer({ model() { return QstateMid(uniformDraw(actionsLo)); }})),
           approxP = clip(1e-10, approxQHi > approxQLo ? (vMid - approxQLo) / (approxQHi - approxQLo) : 0.5, 1-1e-10);
       // Calculate loss for each action:          
-      var lossHi = function(a) { return getLoss(state, a, aleph, vMid, approxQHi, approxP); },
-          lossLo = function(a) { return getLoss(state, a, aleph, vMid, approxQLo, 1-approxP); };
+      var lossHi = function(a) { return combinedLoss(state, a, aleph, vMid, approxQHi, approxP); },
+          lossLo = function(a) { return combinedLoss(state, a, aleph, vMid, approxQLo, 1-approxP); };
       // Construct softmax distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo:
       var defaultPolicy = uninformedPolicy ? uninformedPolicy(state) : undefined,
           probabilityFct = function(a) {
@@ -526,7 +526,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   });
 
   // ! recursive function:
-  var getLoss = dp.cache(function(state, action, aleph, v, q, actionProbability) { 
+  var combinedLoss = dp.cache(function(state, action, aleph, v, q, actionProbability) { 
     var q2 = Q2(state, action, aleph), variance = q2 - squared(q);  // ! recursion here !
     return lossCoeff4variance * (variance + squared(q - v))
             + (lossCoeff4MP > 0 ? lossCoeff4MP * messingPotential_action(state, action) : 0)
@@ -545,7 +545,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     messingPotential, messingPotential_action,
     entropy: behaviorEntropy, entropyAction: behaviorEntropy_action, 
     KLdiv: behaviorKLdiv, KLdivAction: behaviorKLdiv_action, otherLoss, otherLossAction: otherLoss_action, 
-    getLoss
+    getLoss: combinedLoss
   };
 };
 
