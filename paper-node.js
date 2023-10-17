@@ -1,3 +1,10 @@
+/*
+PATCHED VERSION.
+COPY ONTO webppl-agents-satisfia/node_modules/paper/dist/paper-node.js
+AND ONTO ~/.webppl/node_modules/paper/dist/paper-full.js
+*/
+
+
 /*!
  * Paper.js v0.9.25 - The Swiss Army Knife of Vector Graphics Scripting.
  * http://paperjs.org/

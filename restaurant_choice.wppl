@@ -70,7 +70,7 @@ var expectedIndicatorIncrementTable = {
   'Donut N': 1,
   'Veg': 3,
   'Noodle': 2,
-  's': -0.3, // sand roads take time
+  's': -0.1, // -0.3 sand roads take time
   ' ': -0.1
 };
 var varianceOfIndicatorIncrementTable = {
