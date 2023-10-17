@@ -197,6 +197,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   if (debug) console.log("makeMDPAgentSatisfia using parameters", params);
 
+  // ! recursive function:
   var getLocalPolicy = dp.cache(function(state, aleph){
     if (debug) console.log(" getLocalPolicy", state, aleph);
     // The following quantities are potentially intervals: aleph, v, Qstate(a)
@@ -267,33 +268,45 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
   // or of the LRA-based problem (if maxLambda<1):
+  // ! recursive function:
   var maxFeasibleQ = dp.cache(function(state, action){
     var delta = expectedDelta(state, action),
-        q = state.terminateAfterAction ? delta : delta + expectation(Infer({ model() { return maxFeasibleV(transition(state, action)); }}));
+        q = state.terminateAfterAction 
+            ? delta 
+            : delta + expectation(Infer({ model() { 
+              return maxFeasibleV(transition(state, action));  // ! recursion here ! 
+            }}));
     if (debug) console.log("   maxFeasibleQ", state, action, q);
     return q;
   });
+  // ! recursive function:
   var maxFeasibleV = dp.cache(function(state){
     var actions = stateToActions(state),
-        Qstate = function(a) { return maxFeasibleQ(state, a); },
-        v = maxLambda == 1 ? maxWith(Qstate, actions)[1] : interpolate(minWith(Qstate, actions)[1], maxLambda, maxWith(Qstate, actions)[1]);
+        Qstate = function(a) { return maxFeasibleQ(state, a); },  // ! recursion here !
+        v = maxLambda == 1 
+            ? maxWith(Qstate, actions)[1] 
+            : interpolate(minWith(Qstate, actions)[1], maxLambda, maxWith(Qstate, actions)[1]);
     if (debug) console.log("   maxFeasibleV", state, v);
     return v;
   });
 
   // Compute the Q and V functions of the corresponding minimization (!) problem (if minLambda==0)
   // or of the LRA-based problem (if minLambda>0):
+  // ! recursive function:
   var minFeasibleQ = dp.cache(function(state, action){
     var delta = expectedDelta(state, action),
         q = state.terminateAfterAction 
             ? delta 
-            : delta + expectation(Infer({ model() { return minFeasibleV(transition(state, action)); }}));
+            : delta + expectation(Infer({ model() { 
+              return minFeasibleV(transition(state, action));  // ! recursion here !
+            }}));
     if (debug) console.log("   minFeasibleQ", state, action, q);
     return q;
   });
+  // ! recursive function:
   var minFeasibleV = dp.cache(function(state){
     var actions = stateToActions(state),
-        Qstate = function(action) { return minFeasibleQ(state, action); },
+        Qstate = function(action) { return minFeasibleQ(state, action); },  // ! recursion here !
         v = minLambda == 0 
             ? minWith(Qstate, actions)[1] 
             : interpolate(minWith(Qstate, actions)[1], minLambda, maxWith(Qstate, actions)[1]);
@@ -332,6 +345,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   });
 
   // Actual Q and V functions of resulting policy (always returning scalars):
+  // ! recursive function:
   var Q = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q", state, action, aleph);
     return expectation(Infer({ model() {
@@ -341,16 +355,22 @@ var makeMDPAgentSatisfia = function(params_, world) {
       } else {
         var nextState = transition(state, action),
             nextAleph = propagateAspiration(state, aleph, action, delta, nextState);
-        return delta + V(nextState, nextAleph);
+        return delta + V(nextState, nextAleph);  // ! recursion here !
       }
     }}));
   });
+  // ! recursive function:
   var V = dp.cache(function(state, aleph){
     if (debug) console.log("  V", state, aleph);
-    return expectation(Infer({ model() { return Q(state, sample(getLocalPolicy(state, aleph)), aleph); }}));
+    return expectation(Infer({ model() { 
+      return Q(state,  // ! recursion here !
+               sample(getLocalPolicy(state, aleph)),  // ! recursion here ! 
+               aleph);
+    }}));
   });
 
   // Expected squared total, for computing the variance of total:
+  // ! recursive function:
   var Q2 = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q2", state, action, aleph);
     return expectation(Infer({ model() {
@@ -361,13 +381,18 @@ var makeMDPAgentSatisfia = function(params_, world) {
       } else {
         var nextState = transition(state, action),
             nextAleph = propagateAspiration(state, aleph, action, delta, nextState);
-        return delta2 + 2*delta*V(nextState, nextAleph) + V2(nextState, nextAleph);
+        return delta2 + 2*delta*V(nextState, nextAleph) + V2(nextState, nextAleph); // ! recursion here !
       }
     }}));
   });
+  // ! recursive function:
   var V2 = dp.cache(function(state, aleph){
     if (debug) console.log("  V2", state, aleph);
-    return expectation(Infer({ model() { return Q2(state, sample(getLocalPolicy(state, aleph)), aleph); }}));
+    return expectation(Infer({ model() { 
+      return Q2(state,  // ! recursion here !
+                sample(getLocalPolicy(state, aleph)),  // ! recursion here !
+                aleph); 
+    }}));
   });
 
   var propagateAspiration = dp.cache(function(state, aleph4state, action, indicatorIncrement, nextState){
@@ -500,8 +525,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
     return loss;
   });
 
+  // ! recursive function:
   var getLoss = dp.cache(function(state, action, aleph, v, q, actionProbability) { 
-    var q2 = Q2(state, action, aleph), variance = q2 - squared(q);
+    var q2 = Q2(state, action, aleph), variance = q2 - squared(q);  // ! recursion here !
     return lossCoeff4variance * (variance + squared(q - v))
             + (lossCoeff4MP > 0 ? lossCoeff4MP * messingPotential_action(state, action) : 0)
             + (lossCoeff4KLdiv > 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(state, actionProbability, action, aleph) : 0) 
