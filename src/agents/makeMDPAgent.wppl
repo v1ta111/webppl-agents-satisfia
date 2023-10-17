@@ -200,8 +200,38 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   if (debug) console.log("makeMDPAgentSatisfia using parameters", params);
 
+  /*  The dependency/callback graph of the following functions is partially recursive 
+      and involves aggregation (MIN, MAX, E) operations as follows:
+
+      simulate
+      → localPolicy
+        → aspiration4state
+          → minFeasibleV, maxFeasibleV
+            → MIN(minFeasibleQ), MAX(maxFeasibleQ)
+              → E(minFeasibleV), E(maxFeasibleV) (RECURSION)
+        → aspiration4action
+          → minFeasibleQ, maxFeasibleQ
+        → combinedLoss
+          → Q, Q2
+            → propagateAspiration (see below)
+            → E(V), E(V2)
+              → localPolicy (RECURSION)
+              → E(Q), E(Q2) (RECURSION)
+          → otherLoss_action
+            → propagateAspiration (see below)
+            → E(otherLoss_state)
+              → localPolicy (RECURSION)
+              → E(otherLoss_action) (RECURSION)
+          → similarly for other loss components (RECURSION)
+      → expectedDelta, varianceOfDelta, transition
+      → propagateAspiration
+        → aspiration4state
+        → aspiration4action
+      → simulate (RECURSION)
+  */
+
   // ! recursive function:
-  var getLocalPolicy = dp.cache(function(state, aleph){
+  var localPolicy = dp.cache(function(state, aleph){
     if (debug) console.log(" getLocalPolicy", state, aleph);
     // The following quantities are potentially intervals: aleph, v, Qstate(a)
 
@@ -367,7 +397,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     if (debug) console.log("  V", state, aleph);
     return expectation(Infer({ model() { 
       return Q(state,  // ! recursion here !
-               sample(getLocalPolicy(state, aleph)),  // ! recursion here ! 
+               sample(localPolicy(state, aleph)),  // ! recursion here ! 
                aleph);
     }}));
   });
@@ -393,7 +423,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     if (debug) console.log("  V2", state, aleph);
     return expectation(Infer({ model() { 
       return Q2(state,  // ! recursion here !
-                sample(getLocalPolicy(state, aleph)),  // ! recursion here !
+                sample(localPolicy(state, aleph)),  // ! recursion here !
                 aleph); 
     }}));
   });
@@ -426,12 +456,13 @@ var makeMDPAgentSatisfia = function(params_, world) {
     }
   });
 
-  // other safety criteria:
+
+  // Other safety criteria:
 
   // Squared deviation of local relative aspiration from 0.5:
   // recursive function:
-  var LRAdev = dp.cache(function(state, aleph) {
-    var localPolicy = getLocalPolicy(state, aleph);
+  var LRAdev_state = dp.cache(function(state, aleph) {
+    var localPolicy = localPolicy(state, aleph);
     return expectation(Infer({ model() { 
       return LRAdev_action(state, sample(localPolicy), aleph); // ! recursion here !
     }}));
@@ -447,10 +478,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
           } else {
             var nextState = transition(state, action),
                 nextAleph = propagateAspiration(state, aleph, action, expectedDelta(state, action), nextState);
-            return localLRAdev + LRAdev(nextState, nextAleph); // ! recursion here !
+            return localLRAdev + LRAdev_state(nextState, nextAleph); // ! recursion here !
           }
         }}));
-//    console.log("LRAdev_action", state, action, aleph, res);
     return res;
   });
 
@@ -458,8 +488,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
   // (actually, negative KL divergence relative to uninformedPolicy (e.g., a uniform distribution),
   // to be consistent under action cloning or action refinement):
   // recursive function:
-  var behaviorEntropy = dp.cache(function(state, aleph) {
-    var localPolicy = getLocalPolicy(state, aleph); // ! recursion here !
+  var behaviorEntropy_state = dp.cache(function(state, aleph) {
+    var localPolicy = localPolicy(state, aleph); // ! recursion here !
     return expectation(Infer({ model() { 
       var action = sample(localPolicy);
       return behaviorEntropy_action(state, Math.exp(localPolicy.score(action)), action, aleph); // ! recursion here !
@@ -476,7 +506,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           } else {
             var nextState = transition(state, action),
                 nextAleph = propagateAspiration(state, aleph, action, expectedDelta(state, action), nextState);
-            return localEntropy + behaviorEntropy(nextState, nextAleph); // ! recursion here !
+            return localEntropy + behaviorEntropy_state(nextState, nextAleph); // ! recursion here !
           }
         }}));
     return res;
@@ -484,8 +514,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   // KL divergence of behavior relative to refPolicy:
   // recursive function:
-  var behaviorKLdiv = dp.cache(function(state, aleph) {
-    var localPolicy = getLocalPolicy(state, aleph); // ! recursion here !
+  var behaviorKLdiv_state = dp.cache(function(state, aleph) {
+    var localPolicy = localPolicy(state, aleph); // ! recursion here !
     return expectation(Infer({ model() { 
       var action = sample(localPolicy);
       return behaviorKLdiv_action(state, Math.exp(localPolicy.score(action)), action, aleph); // ! recursion here !
@@ -501,7 +531,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           } else {
             var nextState = transition(state, action),
                 nextAleph = propagateAspiration(state, aleph, action, expectedDelta(state, action), nextState);
-            return localDivergence + behaviorKLdiv(nextState, nextAleph); // ! recursion here !
+            return localDivergence + behaviorKLdiv_state(nextState, nextAleph); // ! recursion here !
           }
         }}));
     return res;
@@ -511,7 +541,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   // over trajectories any agent could produce from here):
   // TODO: also add internal entropy here?
   // recursive function:
-  var messingPotential = dp.cache(function(state) {
+  var messingPotential_state = dp.cache(function(state) {
     // FIXME: this can probably be simplified tremendously. I think the expectation is equal to the log of the normalization constant of maxMPpolicy, or its negative:
     var actions = stateToActions(state),
         weights = map(function(a) { return Math.exp(messingPotential_action(state, a)); }, actions),
@@ -530,7 +560,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           } else {
             var nextState = transition(state, action),
                 nextStateScore = transitionDistribution(state, action).score(nextState),
-                nextMP = messingPotential(nextState); // ! recursion here !
+                nextMP = messingPotential_state(nextState); // ! recursion here !
             return nextMP + (uninformedStatePriorScore ? uninformedStatePriorScore(state) : 0) - nextStateScore;
           }
         }}));
@@ -543,8 +573,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   // other loss:
   // recursive function:
-  var otherLoss = dp.cache(function(state, aleph) {
-    var localPolicy = getLocalPolicy(state, aleph); // ! recursion here !
+  var otherLoss_state = dp.cache(function(state, aleph) {
+    var localPolicy = localPolicy(state, aleph); // ! recursion here !
     return expectation(Infer({ model() { 
       return otherLoss_action(state, sample(localPolicy), aleph)  // ! recursion here !
     }}));
@@ -559,7 +589,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           } else {
             var nextState = transition(state, action),
                 nextAleph = propagateAspiration(state, aleph, action, expectedDelta(state, action), nextState);
-            return localLoss + otherLoss(nextState, nextAleph); // ! recursion here !
+            return localLoss + otherLoss_state(nextState, nextAleph); // ! recursion here !
           }
         }}));
     return loss;
@@ -582,11 +612,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
   return { 
     // TODO: rename fields to match internal names (breaking change!)
     minFeasibleQ, maxFeasibleQ, minFeasibleV, maxFeasibleV,
-    getLocalPolicy, propagateAspiration, getAspiration4action, getAspiration4state, 
+    getLocalPolicy: localPolicy, propagateAspiration, getAspiration4action, getAspiration4state, 
     Q, V, Q2, V2, 
-    messingPotential, messingPotential_action,
-    entropy: behaviorEntropy, entropyAction: behaviorEntropy_action, 
-    KLdiv: behaviorKLdiv, KLdivAction: behaviorKLdiv_action, otherLoss, otherLossAction: otherLoss_action, 
+    messingPotential: messingPotential_state, messingPotential_action,
+    entropy: behaviorEntropy_state, entropyAction: behaviorEntropy_action, 
+    KLdiv: behaviorKLdiv_state, KLdivAction: behaviorKLdiv_action, otherLoss: otherLoss_state, otherLossAction: otherLoss_action, 
     getLoss: combinedLoss
   };
 };
