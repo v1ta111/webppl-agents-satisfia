@@ -164,14 +164,18 @@ var makeMDPAgentSatisfia = function(params_, world) {
   }, params_.options) });
 
   // extract parameters, options, and world:
-  var stateToActions = world.stateToActions, transition = world.transition;
-  var expectedDelta = params.expectedIndicatorIncrement,
-      varianceOfDelta = params.varianceOfIndicatorIncrement,
-      minLambda = params.minLambda, maxLambda = params.maxLambda,
+  var stateToActions = world.stateToActions,  // function(state)
+      transition = world.transition;  // stochastic function(state, action)
+  var expectedDelta = params.expectedIndicatorIncrement,  // function(state, action)
+      varianceOfDelta = params.varianceOfIndicatorIncrement,  // function(state, action)
+      minLambda = params.minLambda, 
+      maxLambda = params.maxLambda,
       uninformedStatePriorScore = params.uninformedStatePriorScore,
-      uninformedPolicy = params.uninformedPolicy,
-      refPolicy = params.refPolicy,
-      internalEntropy = params.internalEntropy,
+      uninformedPolicy = params.uninformedPolicy,  // function(state)
+      refPolicy = params.refPolicy,  // function(state)
+      internalActionEntropy = params.internalActionEntropy,  // function(state, action)
+      internalTransitionEntropy = params.internalTransitionEntropy,  // function(state, action, nextState)
+      otherLocalLoss = params.otherLossIncrement,  // function(state, action, aleph, v, q, p)
       lossCoeff4variance = params.lossCoeff4variance,
       lossCoeff4LRA = params.lossCoeff4LRA,
       lossCoeff4MP = params.lossCoeff4MP,
@@ -180,7 +184,6 @@ var makeMDPAgentSatisfia = function(params_, world) {
       lossCoeff4feasibilityPower = params.lossCoeff4feasibilityPower,
       lossCoeff4otherLoss = params.lossCoeff4otherLoss,
       lossCoeff4random = params.lossCoeff4random,
-      otherLocalLoss = params.otherLossIncrement,
       onlyUseClosestActions = params.onlyUseClosestActions,
       softmaxInvTemp = params.softmaxInvTemp,
       rescalingDegree = params.rescalingDegree;
@@ -500,7 +503,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var res = expectation(Infer({ model() {
           var localEntropy = (uninformedPolicy ? uninformedPolicy(state).score(action) : 0) 
                   - Math.log(actionProbability)
-                  + (internalEntropy ? internalEntropy(state, action) : 0);
+                  + (internalActionEntropy ? internalActionEntropy(state, action) : 0);
           if (state.terminateAfterAction){
             return localEntropy;
           } else {
@@ -539,7 +542,6 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   // state's messing potential (maximal entropy (relative to some uninformedStatePrior) 
   // over trajectories any agent could produce from here):
-  // TODO: also add internal entropy here?
   // recursive function:
   var messingPotential_state = dp.cache(function(state) {
     // FIXME: this can probably be simplified tremendously. I think the expectation is equal to the log of the normalization constant of maxMPpolicy, or its negative:
@@ -561,7 +563,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
             var nextState = transition(state, action),
                 nextStateScore = transitionDistribution(state, action).score(nextState),
                 nextMP = messingPotential_state(nextState); // ! recursion here !
-            return nextMP + (uninformedStatePriorScore ? uninformedStatePriorScore(state) : 0) - nextStateScore;
+            return nextMP + (uninformedStatePriorScore ? uninformedStatePriorScore(state) : 0) - nextStateScore
+                   + (internalTransitionEntropy ? internalTransitionEntropy(state, action, nextState) : 0);
           }
         }}));
     return MP;
