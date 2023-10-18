@@ -42,3 +42,21 @@ Run the included test using:
 ## License
 
 MIT
+
+## Additions in this fork:
+
+We added a non-maximizing agent based on aspiration levels: `makeMDPAgentSatisfia`.
+Rather than maximizing the return, this agent is given an initial aspiration point or interval `aleph0` and uses a policy that produce a return (here called `total`) whose expectation equals this point or falls into this interval, if that is possible.
+To achieve this, the agent propagates the initial aspiration from step to step, taking into account the reward (here called `delta`) it gets and the possible total that is still achievable from the current state. It does so in such a way that the total equals the initial aspiration in expectation, using what we call "aspiration rescaling". 
+
+Since there are in general many possible policies that fulfil the constraint regarding the expected total, the agent will use a number of additional criteria to determine its actions.
+In each timestep, it will either use a deterministic action, or mix between two actions selected from those Q-values are closest to the remaining aspiration level from above and below (if `onlyUseClosestActions == true`), or mix between all actions (if `onlyUseClosestActions == false`) in a softmax-like fashion. For this selection or weighing it uses a loss function mixed from  the following terms using adjustable loss coefficients:
+- variance of resulting total
+- squared deviation of the local relative aspiration (the relative position of an action's Q-value in the feasible interval) of each step from 0.5
+- "messing potential" (maximal trajectory entropy that one may produce from the successor state when taking a certain action)
+- behavioral entropy of the policy
+- deviation from a reference policy (KL divergence)
+- "power" as measured by the squared width of the interval of feasible totals
+- other user-supplied safety loss terms
+- random noise
+
