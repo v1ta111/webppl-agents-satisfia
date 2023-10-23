@@ -146,20 +146,20 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
   // extend default parameters and options by supplied ones:
   var params = extend(extend({
-    maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
-    minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-    lossCoeff4variance: 1.0, // weight of variance in loss function, must be >= 0
-    lossCoeff4DeltaVariation: 0.0, // weight of variation of Delta in loss function, must be >= 0
-    lossCoeff4LRA: 0.0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
-    lossCoeff4MP: 0.0, // weight of messing potential in loss function, must be >= 0
-    lossCoeff4entropy: 0.0, // weight of entropy in loss function, must be >= 0
-    lossCoeff4KLdiv: 0.0, // weight of KL divergence in loss function, must be >= 0
-    lossCoeff4feasibilityPower: 0.0, // weight of power of squared feasibility interval width in loss function, must be >= 0
-    lossCoeff4otherLoss: 0.0, // weight of other loss components specified by otherLossIncrement, must be >= 0
+    maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)
+    minLambda: 0, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
+    lossCoeff4variance: 1, // weight of variance in loss function, must be >= 0
+    lossCoeff4DeltaVariation: 0, // weight of variation of Delta in loss function, must be >= 0
+    lossCoeff4LRA: 0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
+    lossCoeff4MP: 0, // weight of messing potential in loss function, must be >= 0
+    lossCoeff4entropy: 0, // weight of entropy in loss function, must be >= 0
+    lossCoeff4KLdiv: 0, // weight of KL divergence in loss function, must be >= 0
+    lossCoeff4feasibilityPower: 0, // weight of power of squared feasibility interval width in loss function, must be >= 0
+    lossCoeff4otherLoss: 0, // weight of other loss components specified by otherLossIncrement, must be >= 0
     lossCoeff4random: 1e-10, // weight of random tie breaker in loss function, must be >= 0
     onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
-    softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
-    rescalingDegree: 1.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
+    softmaxInvTemp: 1, // inverse temperature of softmax mixture of actions, must be > 0
+    rescalingDegree: 1, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
   }, params_), { options: extend({
     debug: false
   }, params_.options) });
