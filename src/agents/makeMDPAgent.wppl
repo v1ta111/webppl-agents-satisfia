@@ -149,13 +149,14 @@ var makeMDPAgentSatisfia = function(params_, world) {
     maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
     lossCoeff4variance: 1.0, // weight of variance in loss function, must be >= 0
+    lossCoeff4DeltaVariation: 1.0, // weight of variation of Delta in loss function, must be >= 0
     lossCoeff4LRA: 0.0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
     lossCoeff4MP: 0.0, // weight of messing potential in loss function, must be >= 0
     lossCoeff4entropy: 0.0, // weight of entropy in loss function, must be >= 0
     lossCoeff4KLdiv: 0.0, // weight of KL divergence in loss function, must be >= 0
     lossCoeff4feasibilityPower: 0.0, // weight of power of squared feasibility interval width in loss function, must be >= 0
     lossCoeff4otherLoss: 0.0, // weight of other loss components specified by otherLossIncrement, must be >= 0
-    lossCoeff4random: 0.0, // weight of random noise in loss function, must be >= 0
+    lossCoeff4random: 1e-10, // weight of random tie breaker in loss function, must be >= 0
     onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
     softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
     rescalingDegree: 1.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
@@ -177,6 +178,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       internalTransitionEntropy = params.internalTransitionEntropy,  // function(state, action, nextState)
       otherLocalLoss = params.otherLossIncrement,  // function(state, action, aleph, v, q, p)
       lossCoeff4variance = params.lossCoeff4variance,
+      lossCoeff4DeltaVariation = params.lossCoeff4DeltaVariation,
       lossCoeff4LRA = params.lossCoeff4LRA,
       lossCoeff4MP = params.lossCoeff4MP,
       lossCoeff4entropy = params.lossCoeff4entropy,
@@ -191,6 +193,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       debug = options.debug;
 
   assert.ok(lossCoeff4variance >= 0, "lossCoeff4variance must be >= 0");
+  assert.ok(lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
   assert.ok(lossCoeff4LRA >= 0, "lossCoeff4LRA must be >= 0");
   assert.ok(lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
   assert.ok(lossCoeff4entropy >= 0, "lossCoeff4entropy must be >= 0");
@@ -215,11 +218,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
         → aspiration4action
           → minFeasibleQ, maxFeasibleQ
         → combinedLoss
-          → Q, Q2
+          → Q, Q2, Q_DeltaSquare, Q_ones
             → propagateAspiration (see below)
-            → E(V), E(V2)
+            → E(V), E(V2), E(V_DeltaSquare), E(V_ones)
               → localPolicy (RECURSION)
-              → E(Q), E(Q2) (RECURSION)
+              → E(Q), E(Q2), E(Q_DeltaSquare), E(Q_ones) (RECURSION)
           → otherLoss_action
             → propagateAspiration (see below)
             → E(otherLoss_state)
@@ -234,8 +237,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
   */
 
   // ! recursive function:
-  var localPolicy = dp.cache(function(state, aleph){
-    if (debug) console.log(" getLocalPolicy", state, aleph);
+  var localPolicy = function(state, aleph) {
+    var policyData = localPolicyData(state, aleph);
+    return Categorical({vs: policyData[0], ps: policyData[1]});
+  }
+  var localPolicyData = dp.cache(function(state, aleph){
+    if (debug) console.log(" localPolicy", state, aleph);
     // The following quantities are potentially intervals: aleph, v, Qstate(a)
 
     // Use aspiration aleph to set the desired expected total for this state before (!) having chosen an action:
@@ -246,7 +253,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var vMid = _.isArray(v) ? (v[0] + v[1]) / 2 : v,
         QstateMid = _.isArray(v) ? function(a) { var q = Qstate(a); return (q[0] + q[1]) / 2; } : Qstate;
 
-    // TODO: make closest and softmax independent:
+    // TODO: make closest/all and softmin/argmin independent options:
 
     if (onlyUseClosestActions) {
       
@@ -255,7 +262,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           qLo = maxWith(function(action) {return QstateMid(action) <= vMid ? QstateMid(action) : -1e10}, actions)[1];
       var actionsHi = filter(function(action) {return QstateMid(action) == qHi}, actions),
           actionsLo = filter(function(action) {return QstateMid(action) == qLo}, actions);
-      // Our local policy that guarantees v in expectation is a suitable mixture of these two actions:
+      // Our local policy that guarantees v in expectation is a suitable mixture of two actions with those Q values:
       var probHi = relativePosition(qLo, vMid, qHi);
       if (debug) console.log("  qHi, qLo, actionsHi, actionsLo, p", qHi, qLo, actionsHi, actionsLo, probHi);
 
@@ -265,12 +272,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
           lossLo = function(action) { return combinedLoss(state, action, aleph, vMid, qLo, 1-probHi); },
           actionHi = minWith(lossHi, actionsHi)[0],
           actionLo = minWith(lossLo, actionsLo)[0];
-      return Categorical({ps: [probHi, 1 - probHi], vs: [actionHi, actionLo]});
+      return [[actionHi, actionLo], [probHi, 1 - probHi]];
 
     } else {
       
       // Use a softmax mixture of all actions, based on the safety loss.
-      // (Note: this will lead to larger entropy and will not behave as consistently under MDP refinements
+      // (Note: this will lead to larger entropy and will not (?) behave as consistently under MDP refinements
       // in which an action is resolved into a sequence of sub-actions.)
 
       // First devide actions into those that are above and below vMid:
@@ -295,7 +302,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
           qLo = expectation(localPolicyLo, QstateMid),
           probHi = clip(1e-10, relativePosition(qLo, vMid, qHi), 1-1e-10);
       // Finally, mix the two local policies with the true p:
-      return Mixture({ps: [probHi, 1 - probHi], dists: [localPolicyHi, localPolicyLo]});
+      var localPolicy = Mixture({ps: [probHi, 1 - probHi], dists: [localPolicyHi, localPolicyLo]});
+      // To use the cache efficiently, we return the policy as a pair of arrays:
+      var actionsTaken = localPolicy.support(),
+          probabilityFct = function(a) { return Math.exp(localPolicy.score(a)) },
+          probabilities = map(probabilityFct, actionsTaken);
+      return [actionsTaken, probabilities];
 
     }
   });
@@ -306,10 +318,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
   // or of the LRA-based problem (if maxLambda<1):
   // ! recursive function:
   var maxFeasibleQ = dp.cache(function(state, action){
-    var delta = expectedDelta(state, action),
+    var Edel = expectedDelta(state, action),
         q = state.terminateAfterAction 
-            ? delta 
-            : delta + expectation(Infer({ model() { 
+            ? Edel 
+            : Edel + expectation(Infer({ model() { 
               return maxFeasibleV(transition(state, action));  // ! recursion here ! 
             }}));
     if (debug) console.log("   maxFeasibleQ", state, action, q);
@@ -330,10 +342,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
   // or of the LRA-based problem (if minLambda>0):
   // ! recursive function:
   var minFeasibleQ = dp.cache(function(state, action){
-    var delta = expectedDelta(state, action),
+    var Edel = expectedDelta(state, action),
         q = state.terminateAfterAction 
-            ? delta 
-            : delta + expectation(Infer({ model() { 
+            ? Edel 
+            : Edel + expectation(Infer({ model() { 
               return minFeasibleV(transition(state, action));  // ! recursion here !
             }}));
     if (debug) console.log("   minFeasibleQ", state, action, q);
@@ -363,7 +375,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       return clip(qLo, aleph4state, qHi);
     } else {
       // For interval aleph, we choose an interval that guarantees that the resulting mixed interval of all
-      // localPolicies that getLocalPolicy() may mix with this action will be within aleph: 
+      // localPolicies that localPolicy() may mix with this action will be within aleph: 
       var alephLo = aleph4state[0], alephHi = aleph4state[1], width = alephHi - alephLo;
       return [Math.max(qLo, Math.min(alephLo, qHi - width)), 
               Math.min(qHi, Math.max(alephHi, qLo + width))];
@@ -385,13 +397,13 @@ var makeMDPAgentSatisfia = function(params_, world) {
   var Q = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q", state, action, aleph);
     return expectation(Infer({ model() {
-      var delta = expectedDelta(state, action);
+      var Edel = expectedDelta(state, action);
       if (state.terminateAfterAction){
-        return delta;
+        return Edel;
       } else {
         var nextState = transition(state, action),
-            nextAleph = propagateAspiration(state, aleph, action, delta, nextState);
-        return delta + V(nextState, nextAleph);  // ! recursion here !
+            nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
+        return Edel + V(nextState, nextAleph);  // ! recursion here !
       }
     }}));
   });
@@ -410,14 +422,14 @@ var makeMDPAgentSatisfia = function(params_, world) {
   var Q2 = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q2", state, action, aleph);
     return expectation(Infer({ model() {
-      var delta = expectedDelta(state, action),
-          delta2 = squared(delta) + varianceOfDelta(state, action);
+      var Edel = expectedDelta(state, action),
+          EdelSq = squared(Edel) + varianceOfDelta(state, action);
       if (state.terminateAfterAction){
-        return delta2;
+        return EdelSq;
       } else {
         var nextState = transition(state, action),
-            nextAleph = propagateAspiration(state, aleph, action, delta, nextState);
-        return delta2 + 2*delta*V(nextState, nextAleph) + V2(nextState, nextAleph); // ! recursion here !
+            nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
+        return EdelSq + 2*Edel*V(nextState, nextAleph) + V2(nextState, nextAleph); // ! recursion here !
       }
     }}));
   });
@@ -431,14 +443,66 @@ var makeMDPAgentSatisfia = function(params_, world) {
     }}));
   });
 
-  var propagateAspiration = dp.cache(function(state, aleph, action, indicatorIncrement, nextState){
-    if (debug) console.log(" propagateAspiration", state, aleph, action, indicatorIncrement, nextState);
+  // Expected total of squared Deltas, for computing the Delta variation along a trajectory:
+  // ! recursive function:
+  var Q_DeltaSquare = dp.cache(function(state, action, aleph){
+    if (debug) console.log("  Q_DeltaSquare", state, action, aleph);
+    return expectation(Infer({ model() {
+      var Edel = expectedDelta(state, action),
+          EdelSq = squared(Edel) + varianceOfDelta(state, action);
+      if (state.terminateAfterAction){
+        return EdelSq;
+      } else {
+        var nextState = transition(state, action),
+            nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
+        return EdelSq + V_DeltaSquare(nextState, nextAleph);  // ! recursion here !
+      }
+    }}));
+  });
+  // ! recursive function:
+  var V_DeltaSquare = dp.cache(function(state, aleph){
+    if (debug) console.log("  V_DeltaSquare", state, aleph);
+    return expectation(Infer({ model() { 
+      return Q_DeltaSquare(state,  // ! recursion here !
+                           sample(localPolicy(state, aleph)),  // ! recursion here ! 
+                           aleph);
+    }}));
+  });
+
+  // Expected total of ones (= expected length of trajectory), for computing the Delta variation along a trajectory:
+  // ! recursive function:
+  var Q_ones = dp.cache(function(state, action, aleph){
+    if (debug) console.log("  Q_ones", state, action, aleph);
+    return expectation(Infer({ model() {
+      var Edel = expectedDelta(state, action);
+      if (state.terminateAfterAction){
+        return 1;
+      } else {
+        var nextState = transition(state, action),
+            nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
+        return 1 + V_ones(nextState, nextAleph);  // ! recursion here !
+      }
+    }}));
+  });
+  // ! recursive function:
+  var V_ones = dp.cache(function(state, aleph){
+    if (debug) console.log("  V_ones", state, aleph);
+    return expectation(Infer({ model() { 
+      return Q_ones(state,  // ! recursion here !
+                   sample(localPolicy(state, aleph)),  // ! recursion here ! 
+                   aleph);
+    }}));
+  });
+
+  var propagateAspiration = // dp.cache(  // caching this easy to compute function would only clutter the cache due to its many arguments
+   function(state, aleph, action, Edel, nextState){
+    if (debug) console.log(" propagateAspiration", state, aleph, action, Edel, nextState);
 
     // the propagated aspiration is a mixture of a steadfast and a rescaled part:
 
     var steadfastAleph4nextState = _.isArray(aleph) 
-          ? [aleph[0] - indicatorIncrement, aleph[1] - indicatorIncrement] 
-          : aleph - indicatorIncrement;
+          ? [aleph[0] - Edel, aleph[1] - Edel] 
+          : aleph - Edel;
 
     if (rescalingDegree == 0.0) {
       return steadfastAleph4nextState;
@@ -457,7 +521,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
       // (only this part preserves aspiration in expectation)
       return interpolate(steadfastAleph4nextState, rescalingDegree, rescaledAleph4nextState);      
     }
-  });
+   }
+  // )
+  ;
 
 
   // Other safety criteria:
@@ -598,25 +664,35 @@ var makeMDPAgentSatisfia = function(params_, world) {
     return loss;
   });
 
+  var randomTieBreaker = dp.cache(function(state, action) { return Math.random(); });
+
   // combined loss:
   // ! recursive function:
   var combinedLoss = dp.cache(function(state, action, aleph, v, q, actionProbability) { 
-    var q2 = Q2(state, action, aleph), variance = q2 - squared(q);  // ! recursion here !
-    return lossCoeff4variance * (variance + squared(q - v))
-            + (lossCoeff4LRA > 0 ? lossCoeff4LRA * LRAdev_action(state, action, aleph) : 0)
-            + (lossCoeff4MP > 0 ? lossCoeff4MP * messingPotential_action(state, action) : 0)
-            + (lossCoeff4KLdiv > 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(state, actionProbability, action, aleph) : 0) 
-            + (lossCoeff4entropy > 0 ? lossCoeff4entropy * behaviorEntropy_action(state, actionProbability, action, aleph) : 0)
-            + (lossCoeff4feasibilityPower > 0 ? lossCoeff4feasibilityPower * squared(maxFeasibleQ(state, action) - minFeasibleQ(state, action)) : 0)
-            + (otherLocalLoss && (lossCoeff4otherLoss > 0) ? lossCoeff4otherLoss * otherLoss_action(state, action, aleph) : 0)
-            + (lossCoeff4random > 0 ? lossCoeff4random * Math.random() : 0);
+    var q_ones = lossCoeff4DeltaVariation > 0 ? Q_ones(state, action, aleph) : undefined;
+    return (
+      (lossCoeff4variance > 0 ? lossCoeff4variance * (
+          Q2(state, action, aleph) - squared(q) + squared(q - v)
+        ) : 0) // ! recursion here !
+      + (lossCoeff4DeltaVariation > 0 ? lossCoeff4DeltaVariation * (
+          Q_DeltaSquare(state, action, aleph) / q_ones -  Q2(state, action, aleph) / squared(q_ones)
+        ) : 0) // ! recursion here !
+      + (lossCoeff4LRA > 0 ? lossCoeff4LRA * LRAdev_action(state, action, aleph) : 0)
+      + (lossCoeff4MP > 0 ? lossCoeff4MP * messingPotential_action(state, action) : 0)
+      + (lossCoeff4KLdiv > 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(state, actionProbability, action, aleph) : 0) 
+      + (lossCoeff4entropy > 0 ? lossCoeff4entropy * behaviorEntropy_action(state, actionProbability, action, aleph) : 0)
+      + (lossCoeff4feasibilityPower > 0 ? lossCoeff4feasibilityPower * squared(maxFeasibleQ(state, action) - minFeasibleQ(state, action)) : 0)
+      + (otherLocalLoss && (lossCoeff4otherLoss > 0) ? lossCoeff4otherLoss * otherLoss_action(state, action, aleph) : 0)
+      + (lossCoeff4random > 0 ? lossCoeff4random * randomTieBreaker(state, action) : 0)
+    );
   });
 
   return { 
     // TODO: rename fields to match internal names (breaking change!)
     minFeasibleQ, maxFeasibleQ, minFeasibleV, maxFeasibleV,
-    getLocalPolicy: localPolicy, propagateAspiration, getAspiration4action, getAspiration4state, 
-    Q, V, Q2, V2, 
+    getLocalPolicy: localPolicy, localPolicyData,
+    propagateAspiration, getAspiration4action, getAspiration4state, 
+    Q, V, Q2, V2, Q_DeltaSquare, V_DeltaSquare, Q_ones, V_ones,
     messingPotential: messingPotential_state, messingPotential_action,
     entropy: behaviorEntropy_state, entropyAction: behaviorEntropy_action, 
     KLdiv: behaviorKLdiv_state, KLdivAction: behaviorKLdiv_action, otherLoss: otherLoss_state, otherLossAction: otherLoss_action, 

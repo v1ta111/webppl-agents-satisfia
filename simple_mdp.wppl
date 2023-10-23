@@ -173,3 +173,5 @@ console.log("KL divergence from reference policy is", KLdiv(mdp.startState, alep
 var out = simulate(mdp.startState, aleph0);
 console.log("trajectory", out.trajectory);
 
+var lpd = agent.localPolicyData;
+console.log(lpd, lpd.cache);
