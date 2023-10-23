@@ -149,7 +149,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
     lossCoeff4variance: 1.0, // weight of variance in loss function, must be >= 0
-    lossCoeff4DeltaVariation: 1.0, // weight of variation of Delta in loss function, must be >= 0
+    lossCoeff4DeltaVariation: 0.0, // weight of variation of Delta in loss function, must be >= 0
     lossCoeff4LRA: 0.0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
     lossCoeff4MP: 0.0, // weight of messing potential in loss function, must be >= 0
     lossCoeff4entropy: 0.0, // weight of entropy in loss function, must be >= 0
