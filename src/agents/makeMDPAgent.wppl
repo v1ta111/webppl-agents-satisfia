@@ -272,7 +272,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           lossLo = function(action) { return combinedLoss(state, action, aleph, vMid, qLo, 1-probHi); },
           actionHi = minWith(lossHi, actionsHi)[0],
           actionLo = minWith(lossLo, actionsLo)[0];
-      return [[actionHi, actionLo], [probHi, 1 - probHi]];
+      return actionHi == actionLo ? [[actionHi], [1]] : [[actionHi, actionLo], [probHi, 1 - probHi]];
 
     } else {
       
