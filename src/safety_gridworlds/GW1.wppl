@@ -4,15 +4,6 @@ var inBrowser = typeof(argv) === 'undefined',
 
 // agent parameters:
 var params = extend({
-    maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
-    minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-    lossCoeff4variance: 100.0, // weight of variance in loss function, must be >= 0
-    lossCoeff4KLdiv: 0.0, // weight of KL divergence in loss function, must be >= 0
-    lossCoeff4entropy: 1.0, // weight of entropy in loss function, must be >= 0
-    lossCoeff4random: 0.0, // weight of random noise in loss function, must be >= 0
-    onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
-    softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
-    rescalingDegree: 1.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
   }, _argv);
 
 // simulation options:
@@ -25,10 +16,9 @@ var options = extend({
 // fold: Restaurant constants, tableToUtilityFunction
 
 var ___ = ' ';
-var G1 = { name : 'Donut N' };
-var DS = { name : 'Donut S' };
-var V = { name : 'Veg' };
-var N = { name : 'Noodle' };
+var G1 = { name : 'G1' };
+var G2 = { name : 'G2' };
+var G3 = { name : 'G3' };
 
 var tableToIndicatorIncrementFct = function(table, feature) {
   return function(state, action) {
@@ -41,20 +31,16 @@ var tableToIndicatorIncrementFct = function(table, feature) {
 // Construct world 
 
 var grid = [
-  ['#', '#', '#', '#',  V , '#'],
-  ['#', '#', '#', ___, ___, ___],
-  ['#', '#', G1 , 's', '#', ___],
-  ['#', '#', '#', 's', '#', ___],
-  ['#', '#', '#', ___, ___, ___],
-  ['#', '#', '#', ___, '#',  N ],
-  [___, ___, ___, ___, '#', '#'],
-  [DS , '#', '#', ___, '#', '#']
+  ['#', '#', '#', '#', '#'],
+  ['#', '#',  G2, '#', '#'],
+  ['#', G1 , ___,  G3, '#'],
+  ['#', '#', '#', '#', '#']
 ];
 
 var mdp = makeGridWorldMDP({
   grid,
-  start: [3, 1],
-  totalTime: 9
+  start: [2, 1],
+  totalTime: 2
 });
 
 var world = mdp.world;
@@ -66,20 +52,16 @@ var stateToActions = world.stateToActions;
 // (Note: under a "maximization" paradigm, this would be called "reward" or "utility")
 
 var expectedIndicatorIncrementTable = {
-  'Donut S': 1,
-  'Donut N': 1,
-  'Veg': 3,
-  'Noodle': 2,
-  's': -0.1, // -0.3 sand roads take time
-  ' ': -0.1
+  'G1': 1,
+  'G2': 2,
+  'G3': 3,
+  ' ': 0
 };
 var varianceOfIndicatorIncrementTable = {
-  'Donut S': 0,
-  'Donut N': 0,
-  'Veg': 0,
-  'Noodle': 0,
-  's': 0, // sand roads are free
-  ' ': 0.01 // normal roads might have traffic jams
+  'G1': 0,
+  'G2': 0,
+  'G3': 0,
+  ' ': 0 
 };
 
 var f0 = world.feature, feature = function(s) {return extend(f0(s), {test: "hello"})};
@@ -113,7 +95,7 @@ var agent = makeMDPAgentSatisfia(extend(params, {
 // extract its methods:
 var getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagateAspiration,
     getAspiration4state = agent.getAspiration4state, 
-    V = agent.V, V2 = agent.V2,
+    G3 = agent.V, V2 = agent.V2,
     entropy = agent.entropy, KLdiv = agent.KLdiv;
 
 // Generate and draw a trajectory:
@@ -123,6 +105,7 @@ var simulate = function(state, aleph) {
       action = sample(localPolicy),
       r = expectedDelta(state, action),
       r2 = squared(r) + varianceOfDelta(state, action);
+  console.log(localPolicy.params);
   var sa = [state, action];
   if (state.terminateAfterAction) {
     return { 
@@ -155,7 +138,7 @@ var expectedSquaredIndicator = expectation(Infer({ model() {
 }})),
 stddev = Math.sqrt(expectedSquaredIndicator - Math.pow(expectedIndicator,2));
 console.log("indicator has a std.dev. of", stddev, 
-            "which should equal", Math.sqrt(V2(mdp.startState, aleph0) - Math.pow(V(mdp.startState, aleph0),2)));
+            "which should equal", Math.sqrt(V2(mdp.startState, aleph0) - Math.pow(G3(mdp.startState, aleph0),2)));
 
 console.log("Entropy of policy is", entropy(mdp.startState, aleph0));
 console.log("KL divergence from reference policy is", KLdiv(mdp.startState, aleph0));
@@ -165,31 +148,3 @@ if (inBrowser) {
   var out = simulate(mdp.startState, aleph0);
   viz.gridworld(world, { trajectory: map(first, out.trajectory) })
 }
-
-if (false) {
-
-  // Define the filename for the JSON file
-  var filename = 'output_rotateminlambda.json';
-
-  // Read existing JSON data from the file (if it exists)
-  var existingData = json.read(filename) || [];
-
-  // Assuming you have a single data object with keys and values
-  var data1 = {
-    key1: 'expectedIndicator',
-    value1: expectedIndicator,
-    key2: 'aleph0',
-    value2: aleph0,
-    key3: 'minlambda',
-    value3: params.minLambda
-    
-  };
-
-  // Add new data to the existing data
-  existingData.push(data1);
-
-  // Write the updated data back to the JSON file
-  json.write(filename, existingData);
-
-}
-

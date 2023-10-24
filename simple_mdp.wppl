@@ -4,17 +4,6 @@ var inBrowser = typeof(argv) === 'undefined',
 
 // agent parameters:
 var params = extend({
-/*
-    maxLambda: 0.99, // upper bound on local relative aspiration in each step (must be minLambda...1)
-    minLambda: 0.01, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-    lossCoeff4variance: 100.0, // weight of variance in loss function, must be >= 0
-    lossCoeff4KLdiv: 0.0, // weight of KL divergence in loss function, must be >= 0
-    lossCoeff4entropy: 1.0, // weight of entropy in loss function, must be >= 0
-    lossCoeff4random: 0.0, // weight of random noise in loss function, must be >= 0
-    onlyUseClosestActions: false, // if true, only use the two actions that are closest to the target aspiration in expectation
-    softmaxInvTemp: 1.0, // inverse temperature of softmax mixture of actions, must be > 0
-    rescalingDegree: 0.0, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
-*/
 }, _argv);
 
 // simulation options:
@@ -92,10 +81,10 @@ var transition = function(state, action) {
     return { code: [3, 1, 1, 1, 0], terminateAfterAction: false };
   }
 } 
-var expectedIndicatorIncrement = function(state, action) {
+var expectedDelta = function(state, action) {
   return state.code == 'won' ? 1 : 0;
 };  
-var varianceOfIndicatorIncrement = function(state, action) {
+var varianceOfDelta = function(state, action) {
   return 0;
 };  
 var world = { stateToActions, transition }, mdp = { world, startState };
@@ -108,7 +97,7 @@ var uninformedPolicy = function(state) {
 
 // initialize the agent
 var agent = makeMDPAgentSatisfia(extend(params, {
-      expectedIndicatorIncrement, varianceOfIndicatorIncrement, 
+      expectedIndicatorIncrement: expectedDelta, varianceOfIndicatorIncrement: varianceOfDelta, 
       uninformedPolicy, 
       refPolicy,
       options
@@ -117,7 +106,7 @@ var agent = makeMDPAgentSatisfia(extend(params, {
 // extract its methods:
 var getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagateAspiration,
     getAspiration4state = agent.getAspiration4state, 
-    V = agent.V, V2 = agent.V2,
+    G3 = agent.V, V2 = agent.V2,
     entropy = agent.entropy, KLdiv = agent.KLdiv;
 
 // Generate and draw a trajectory:
@@ -125,8 +114,8 @@ var simulate = function(state, aleph) {
   if (options.debug) console.log("simulate", state, aleph);
   var localPolicy = getLocalPolicy(state, aleph),
       action = sample(localPolicy),
-      r = expectedIndicatorIncrement(state, action),
-      r2 = squared(r) + varianceOfIndicatorIncrement(state, action);
+      r = expectedDelta(state, action),
+      r2 = squared(r) + varianceOfDelta(state, action);
   var sa = [state, action];
   if (state.terminateAfterAction) {
     if (options.debug) console.log("...terminal state");
