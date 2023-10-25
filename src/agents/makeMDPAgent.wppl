@@ -148,7 +148,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
   var params = extend(extend({
     maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)
     minLambda: 0, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-    lossCoeff4variance: 1, // weight of variance in loss function, must be >= 0
+    lossCoeff4variance: 1, // weight of variance of total in loss function, must be >= 0
+    lossCoeff4fourth: 0, // weight of centralized fourth moment of total in loss function, must be >= 0
     lossCoeff4DeltaVariation: 0, // weight of variation of Delta in loss function, must be >= 0
     lossCoeff4LRA: 0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
     lossCoeff4MP: 0, // weight of messing potential in loss function, must be >= 0
@@ -168,7 +169,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
   var stateToActions = world.stateToActions,  // function(state)
       transition = world.transition;  // stochastic function(state, action)
   var expectedDelta = params.expectedIndicatorIncrement,  // function(state, action)
-      varianceOfDelta = params.varianceOfIndicatorIncrement,  // function(state, action)
+      varianceOfDelta = params.varianceOfIndicatorIncrement 
+        || function(state, action) { return 0; },  // function(state, action)
+      skewnessOfDelta = params.skewnessOfDelta
+        || function(state, action) { return 0; },  // function(state, action)
+      excessKurtosisOfDelta = params.excessKurtosisOfDelta
+        || function(state, action) { return 0; },  // function(state, action)
       minLambda = params.minLambda, 
       maxLambda = params.maxLambda,
       uninformedStatePriorScore = params.uninformedStatePriorScore,
@@ -178,6 +184,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       internalTransitionEntropy = params.internalTransitionEntropy,  // function(state, action, nextState)
       otherLocalLoss = params.otherLossIncrement,  // function(state, action, aleph, v, q, p)
       lossCoeff4variance = params.lossCoeff4variance,
+      lossCoeff4fourth = params.lossCoeff4fourth,
       lossCoeff4DeltaVariation = params.lossCoeff4DeltaVariation,
       lossCoeff4LRA = params.lossCoeff4LRA,
       lossCoeff4MP = params.lossCoeff4MP,
@@ -193,6 +200,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       debug = options.debug;
 
   assert.ok(lossCoeff4variance >= 0, "lossCoeff4variance must be >= 0");
+  assert.ok(lossCoeff4fourth >= 0, "lossCoeff4fourthMoment must be >= 0");
   assert.ok(lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
   assert.ok(lossCoeff4LRA >= 0, "lossCoeff4LRA must be >= 0");
   assert.ok(lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
@@ -405,8 +413,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
             nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
         return Edel + V(nextState, nextAleph);  // ! recursion here !
       }
-    }}));
+    }})); 
   });
+  // TODO: fix the Infinity error for GW6, webppl --require webppl-dp --require webppl-json --require . restaurant_choice.wppl -- --aleph0 2  --maxLambda 1.0 --minLambda 0.3 --debug 1
   // ! recursive function:
   var V = dp.cache(function(state, aleph){
     if (debug) console.log("  V", state, aleph);
@@ -417,13 +426,39 @@ var makeMDPAgentSatisfia = function(params_, world) {
     }}));
   });
 
+  // TODO: why does the following not work?
+  /*
+  // helper function used in Bellman-equation-based quantities: 
+  var VfromQ = function(someQ) { 
+    return dp.cache(function(state, aleph) { 
+      return expectation(Infer({ model() { 
+        return someQ(state, sample(localPolicy(state, aleph)), aleph); 
+      }}));
+    }); 
+  };
+  var V = VfromQ(Q);
+  */
+
+  var expectedDeltaSquared = dp.cache(function(state, action){
+    var Edel = expectedDelta(state, action);
+    return squared(Edel) + varianceOfDelta(state, action);
+  });
+  var expectedDeltaCube = dp.cache(function(state, action){
+    var Edel = expectedDelta(state, action),
+        varDel = varianceOfDelta(state, action);
+    return Math.pow(varDel, 1.5)*skewnessOfDelta(state, action) + 3*Edel*varDel + Math.pow(Edel, 3);
+  });
+  var expectedDeltaFourth = dp.cache(function(state, action){
+    return squared(varianceOfDelta(state, action)) * (3 + excessKurtosisOfDelta(state, action));
+  });
+
   // Expected squared total, for computing the variance of total:
   // ! recursive function:
   var Q2 = dp.cache(function(state, action, aleph){
     if (debug) console.log("  Q2", state, action, aleph);
     return expectation(Infer({ model() {
       var Edel = expectedDelta(state, action),
-          EdelSq = squared(Edel) + varianceOfDelta(state, action);
+          EdelSq = expectedDeltaSquared(state, action);
       if (state.terminateAfterAction){
         return EdelSq;
       } else {
@@ -443,6 +478,63 @@ var makeMDPAgentSatisfia = function(params_, world) {
     }}));
   });
 
+  // Similarly: Expected third and fourth powers of total, for computing the fourth centralized moment of total:
+  // ! recursive function:
+  var Q3 = dp.cache(function(state, action, aleph){
+    if (debug) console.log("  Q3", state, action, aleph);
+    return expectation(Infer({ model() {
+      var Edel = expectedDelta(state, action),
+          Edel2 = expectedDeltaSquared(state, action),
+          Edel3 = expectedDeltaCube(state, action);
+      if (state.terminateAfterAction){
+        return Edel3;
+      } else {
+        var nextState = transition(state, action),
+            nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
+        return Edel3 + 3*Edel2*V(nextState, nextAleph) + 3*Edel*V2(nextState, nextAleph) + V3(nextState, nextAleph); // ! recursion here !
+      }
+    }}));
+  });
+  // ! recursive function:
+  var V3 = dp.cache(function(state, aleph){
+    if (debug) console.log("  V3", state, aleph);
+    return expectation(Infer({ model() {
+      return Q3(state,  // ! recursion here !
+                sample(localPolicy(state, aleph)),  // ! recursion here !
+                aleph);
+    }}));
+  });
+
+
+  // Expected fourth power of total, for computing the expected fourth power of deviation of total from expected total (= fourth centralized moment of total):
+  // ! recursive function:
+  var Q4 = dp.cache(function(state, action, aleph){
+    if (debug) console.log("  Q4", state, action, aleph);
+    return expectation(Infer({ model() {
+      var Edel = expectedDelta(state, action),
+          Edel2 = expectedDeltaSquared(state, action),
+          Edel3 = expectedDeltaCube(state, action),
+          Edel4 = expectedDeltaFourth(state, action);
+      if (state.terminateAfterAction){
+        return Edel4;
+      } else {
+        var nextState = transition(state, action),
+            nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
+        return Edel4 + 4*Edel3*V(nextState, nextAleph) + 6*Edel2*V2(nextState, nextAleph) + 4*Edel*V3(nextState, nextAleph) + V4(nextState, nextAleph); // ! recursion here !
+      }
+    }}));
+  });
+  // ! recursive function:
+  var V4 = dp.cache(function(state, aleph){
+    if (debug) console.log("  V4", state, aleph);
+    return expectation(Infer({ model() {
+      return Q4(state,  // ! recursion here !
+                sample(localPolicy(state, aleph)),  // ! recursion here !
+                aleph);
+    }}));
+  });
+
+  // TODO: verify the formulas for Delta variation along a trajectory:
   // Expected total of squared Deltas, for computing the Delta variation along a trajectory:
   // ! recursive function:
   var Q_DeltaSquare = dp.cache(function(state, action, aleph){
@@ -524,7 +616,6 @@ var makeMDPAgentSatisfia = function(params_, world) {
    }
   // )
   ;
-
 
   // Other safety criteria:
 
@@ -672,8 +763,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var q_ones = lossCoeff4DeltaVariation > 0 ? Q_ones(state, action, aleph) : undefined;
     return (
       (lossCoeff4variance > 0 ? lossCoeff4variance * (
-          Q2(state, action, aleph) - squared(q) + squared(q - v)
+          Q2(state, action, aleph) - 2*q*v + squared(v)
         ) : 0) // ! recursion here !
+      + (lossCoeff4fourth > 0 ? lossCoeff4fourth * (
+          Q4(state, action, aleph) - 4*v*Q3(state, action, aleph) + 6*squared(v)*Q2(state, action, aleph) 
+            - 4*cubed(v)*q + Math.pow(v, 4)
+        ) : 0) // ! recursion here ! 
       + (lossCoeff4DeltaVariation > 0 ? lossCoeff4DeltaVariation * (
           Q_DeltaSquare(state, action, aleph) / q_ones -  Q2(state, action, aleph) / squared(q_ones)
         ) : 0) // ! recursion here !
@@ -746,4 +841,5 @@ var intersect = function(interval1, interval2) {
   return (interval1[0] <= interval2[1]) && (interval2[0] <= interval1[1]);
 }
 
-var squared = function(x) { return Math.pow(x, 2); };
+var squared = function(x) { return x*x; },
+    cubed = function(x) { return Math.pow(x, 3); };
