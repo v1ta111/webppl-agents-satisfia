@@ -9,8 +9,8 @@
  * - use https://github.com/Pterodactylus/Ceres.js as solver?
  */
 
-module.exports = {
-
+module.exports = function(env) { return { 
+        
     estimateMetalog: function (moments) { 
         /*
          * Example for computing the probability p2-p1 of falling into interval [b1,b2] 
@@ -20,6 +20,7 @@ module.exports = {
          *    skewness = pi²a2²a3 + pi²a3³/24
          * TODO: how to form this system of equations for arbitrary number of moments? Does this help: http://www.metalogdistributions.com/moments.html ?
          */
+        console.log("Hi");
         return undefined; // TODO
     },
         
@@ -40,4 +41,4 @@ module.exports = {
         var params = this.estimateMetalog(moments);
         return this.metalogCDF(params, hi) - this.metalogCDF(params, lo);
     },
-};
+}};

@@ -1,11 +1,18 @@
 // run via  webppl --require webppl-dp --require . simple_mdp.wppl
 
+// this doesn't work, how to make functions from js files available in webppl code???
+
+// import { estimateMetalog } from "./src/utils/metalog";
+
+var test = estimateMetalog(undefined);
+
 // make sure code runs in browser and on command line:
 var inBrowser = typeof(argv) === 'undefined',
     _argv = inBrowser ? {} : argv;
 
 // agent parameters:
 var params = extend({
+  // some env-specific default parameter settings
 }, _argv);
 
 // simulation options:
