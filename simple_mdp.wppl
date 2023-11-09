@@ -1,3 +1,5 @@
+// run via  webppl --require webppl-dp --require . simple_mdp.wppl
+
 // make sure code runs in browser and on command line:
 var inBrowser = typeof(argv) === 'undefined',
     _argv = inBrowser ? {} : argv;
@@ -97,22 +99,22 @@ var uninformedPolicy = function(state) {
 
 // initialize the agent
 var agent = makeMDPAgentSatisfia(extend(params, {
-      expectedIndicatorIncrement: expectedDelta, varianceOfIndicatorIncrement: varianceOfDelta, 
+      expectedDelta: expectedDelta, varianceOfDelta: varianceOfDelta, 
       uninformedPolicy, 
       refPolicy,
       options
     }), world);
 
 // extract its methods:
-var getLocalPolicy = agent.getLocalPolicy, propagateAspiration = agent.propagateAspiration,
-    getAspiration4state = agent.getAspiration4state, 
+var localPolicy = agent.localPolicy, propagateAspiration = agent.propagateAspiration,
+    aspiration4state = agent.aspiration4state, 
     G3 = agent.V, V2 = agent.V2,
-    entropy = agent.entropy, KLdiv = agent.KLdiv;
+    behaviorEntropy_state = agent.behaviorEntropy_state, behaviorKLdiv_state = agent.behaviorKLdiv_state;
 
 // Generate and draw a trajectory:
 var simulate = function(state, aleph) {
   if (options.debug) console.log("simulate", state, aleph);
-  var localPolicy = getLocalPolicy(state, aleph),
+  var localPolicy = localPolicy(state, aleph),
       action = sample(localPolicy),
       r = expectedDelta(state, action),
       r2 = squared(r) + varianceOfDelta(state, action);
@@ -153,8 +155,8 @@ stddev = Math.sqrt(expectedSquaredIndicator - Math.pow(expectedIndicator,2));
 console.log("indicator has a std.dev. of", stddev, 
             "which should equal", Math.sqrt(V2(mdp.startState, aleph0) - Math.pow(V(mdp.startState, aleph0),2)));
 /**/
-console.log("Entropy of policy is", entropy(mdp.startState, aleph0));
-console.log("KL divergence from reference policy is", KLdiv(mdp.startState, aleph0));
+console.log("Entropy of policy is", behaviorEntropy_state(mdp.startState, aleph0));
+console.log("KL divergence from reference policy is", behaviorKLdiv_state(mdp.startState, aleph0));
 /**/
 
 

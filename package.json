@@ -20,10 +20,12 @@
   "webppl": {
     "wppl": [
       "src/utils/utils.wppl",
+      "src/utils/utilsSatisfia.wppl",
       "src/environments/makeGridWorldMDP.wppl",
       "src/environments/makeBanditPOMDP.wppl",
       "src/environments/makeGridWorldPOMDP.wppl",
       "src/agents/makeMDPAgent.wppl",
+      "src/agents/makeMDPAgentSatisfia.wppl",
       "src/agents/makePOMDPAgent.wppl",
       "src/simulation/simulateMDP.wppl",
       "src/simulation/simulatePOMDP.wppl",
