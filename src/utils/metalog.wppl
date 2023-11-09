@@ -1,0 +1,4 @@
+var getMetalog = function () {
+    // initialize solver and wait until it is ready:
+    return { solver: callAsync(ceres.newCeres, undefined) };
+};

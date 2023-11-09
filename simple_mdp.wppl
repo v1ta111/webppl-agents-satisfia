@@ -1,19 +1,12 @@
-// run via  webppl --require webppl-dp --require . simple_mdp.wppl
+// run via  webppl --require webppl-dp --require webppl-call-async --require packaged_3rdparty_modules/ceres --require . simple_mdp.wppl
 
-// this doesn't work, how to make functions from js files available in webppl code???
-
-// import { estimateMetalog } from "./src/utils/metalog";
-
-var test = estimateMetalog(undefined);
-
-// make sure code runs in browser and on command line:
-var inBrowser = typeof(argv) === 'undefined',
-    _argv = inBrowser ? {} : argv;
+// find out about environment:
+var env = getEnv();
 
 // agent parameters:
 var params = extend({
   // some env-specific default parameter settings
-}, _argv);
+}, env.argv);
 
 // simulation options:
 var options = extend({
@@ -31,7 +24,7 @@ var options = extend({
       pEasyLoHard: 0.65, // probability of getting an easy position if in hard position and focusing on potting
       aleph0: [0.8, 0.9], // initial global aspiration (desired expected return);
       debug: false, // if true, print debug messages
-    }, _argv),
+    }, env.argv),
     aleph0 = typeof(options.aleph0Lo) === 'undefined' ? options.aleph0 : [options.aleph0Lo, options.aleph0Hi];
 
 // hand-coded world:

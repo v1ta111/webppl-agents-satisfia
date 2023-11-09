@@ -3,6 +3,10 @@
 
 var makeMDPAgentSatisfia = function(params_, world) {
 
+    var metalog = getMetalog(); // needed to enable metalog distribution used in loss function
+    webpplAgents.testMetalog(metalog);
+    console.log("HEY!");
+
     // extend default parameters and options by supplied ones:
     var params = extend(extend({
       maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)

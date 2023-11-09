@@ -1,0 +1,13 @@
+{
+    "name": "ceres",
+    "version": "1.5.3",
+    "description": "Packaged optimization library Ceres.",
+    "main": "src/Ceres-v1.5.3-CommonJS.js",
+    "dependencies": {
+    },
+    "keywords": [],
+    "author": "see homepage",
+    "license": "MPL-2.0",
+    "homepage": "https://github.com/Pterodactylus/Ceres.js"
+}
+  

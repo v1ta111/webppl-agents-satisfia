@@ -1,3 +1,8 @@
+var getEnv = function () {
+  var inBrowser = typeof(argv) === 'undefined';
+  return { inBrowser, argv: inBrowser ? {} : argv };
+};
+
 var extend = function(base, ext) {
   return _.extend({}, base, ext);
 };
