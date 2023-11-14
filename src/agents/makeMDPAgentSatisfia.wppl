@@ -4,23 +4,22 @@
 var makeMDPAgentSatisfia = function(params_, world) {
 
     var metalog = getMetalog(); // needed to enable metalog distribution used in loss function
-    webpplAgents.testMetalog(metalog);
-    console.log("HEY!");
 
     // extend default parameters and options by supplied ones:
     var params = extend(extend({
       maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)
       minLambda: 0, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-      lossCoeff4variance: 1, // weight of variance of total in loss function, must be >= 0
-      lossCoeff4fourth: 0, // weight of centralized fourth moment of total in loss function, must be >= 0
+      lossCoeff4BedNBanks: 1, // weight of BedNBanks loss component, must be >= 0
+      lossCoeff4Variance: 0, // weight of variance of total in loss function, must be >= 0
+      lossCoeff4Fourth: 0, // weight of centralized fourth moment of total in loss function, must be >= 0
       lossCoeff4DeltaVariation: 0, // weight of variation of Delta in loss function, must be >= 0
       lossCoeff4LRA: 0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
       lossCoeff4MP: 0, // weight of messing potential in loss function, must be >= 0
-      lossCoeff4entropy: 0, // weight of entropy in loss function, must be >= 0
+      lossCoeff4Entropy: 0, // weight of entropy in loss function, must be >= 0
       lossCoeff4KLdiv: 0, // weight of KL divergence in loss function, must be >= 0
-      lossCoeff4feasibilityPower: 0, // weight of power of squared feasibility interval width in loss function, must be >= 0
-      lossCoeff4otherLoss: 0, // weight of other loss components specified by otherLossIncrement, must be >= 0
-      lossCoeff4random: 1e-10, // weight of random tie breaker in loss function, must be >= 0
+      lossCoeff4FeasibilityPower: 0, // weight of power of squared feasibility interval width in loss function, must be >= 0
+      lossCoeff4OtherLoss: 0, // weight of other loss components specified by otherLossIncrement, must be >= 0
+      lossCoeff4Random: 1e-10, // weight of random tie breaker in loss function, must be >= 0
       onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
       softmaxInvTemp: 1, // inverse temperature of softmax mixture of actions, must be > 0
       rescalingDegree: 1, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
@@ -38,6 +37,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
           || function(state, action) { return 0; },  // function(state, action)
         excessKurtosisOfDelta = params.excessKurtosisOfDelta
           || function(state, action) { return 0; },  // function(state, action)
+        expectedDeltaFifth = params.expectedDeltaFifth
+          || function(state, action) { return 0; },  // function(state, action)
+        expectedDeltaSixth = params.expectedDeltaSixth
+          || function(state, action) { return 0; },  // function(state, action)
         minLambda = params.minLambda, 
         maxLambda = params.maxLambda,
         uninformedStatePriorScore = params.uninformedStatePriorScore,
@@ -46,32 +49,34 @@ var makeMDPAgentSatisfia = function(params_, world) {
         internalActionEntropy = params.internalActionEntropy,  // function(state, action)
         internalTransitionEntropy = params.internalTransitionEntropy,  // function(state, action, nextState)
         otherLocalLoss = params.otherLossIncrement,  // function(state, action, aleph, v, q, p)
-        lossCoeff4variance = params.lossCoeff4variance,
-        lossCoeff4fourth = params.lossCoeff4fourth,
+        lossCoeff4BedNBanks = params.lossCoeff4BedNBanks,
+        lossCoeff4Variance = params.lossCoeff4Variance,
+        lossCoeff4Fourth = params.lossCoeff4Fourth,
         lossCoeff4DeltaVariation = params.lossCoeff4DeltaVariation,
         lossCoeff4LRA = params.lossCoeff4LRA,
         lossCoeff4MP = params.lossCoeff4MP,
-        lossCoeff4entropy = params.lossCoeff4entropy,
+        lossCoeff4Entropy = params.lossCoeff4Entropy,
         lossCoeff4KLdiv = params.lossCoeff4KLdiv,
-        lossCoeff4feasibilityPower = params.lossCoeff4feasibilityPower,
-        lossCoeff4otherLoss = params.lossCoeff4otherLoss,
-        lossCoeff4random = params.lossCoeff4random,
+        lossCoeff4FeasibilityPower = params.lossCoeff4FeasibilityPower,
+        lossCoeff4OtherLoss = params.lossCoeff4OtherLoss,
+        lossCoeff4Random = params.lossCoeff4Random,
         onlyUseClosestActions = params.onlyUseClosestActions,
         softmaxInvTemp = params.softmaxInvTemp,
         rescalingDegree = params.rescalingDegree;
     var options = params.options, 
         debug = options.debug;
   
-    assert.ok(lossCoeff4variance >= 0, "lossCoeff4variance must be >= 0");
-    assert.ok(lossCoeff4fourth >= 0, "lossCoeff4fourthMoment must be >= 0");
+    assert.ok(lossCoeff4BedNBanks >= 0, "lossCoeff4BedNBanks must be >= 0");
+    assert.ok(lossCoeff4Variance >= 0, "lossCoeff4variance must be >= 0");
+    assert.ok(lossCoeff4Fourth >= 0, "lossCoeff4Fourth must be >= 0");
     assert.ok(lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
     assert.ok(lossCoeff4LRA >= 0, "lossCoeff4LRA must be >= 0");
     assert.ok(lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
-    assert.ok(lossCoeff4entropy >= 0, "lossCoeff4entropy must be >= 0");
+    assert.ok(lossCoeff4Entropy >= 0, "lossCoeff4entropy must be >= 0");
     assert.ok(lossCoeff4KLdiv >= 0, "lossCoeff4KLdiv must be >= 0");
-    assert.ok(lossCoeff4feasibilityPower >= 0, "lossCoeff4feasibilityPower must be >= 0");
-    assert.ok(lossCoeff4otherLoss >= 0, "lossCoeff4otherLoss must be >= 0");
-    assert.ok(lossCoeff4random >= 0, "lossCoeff4random must be >= 0");
+    assert.ok(lossCoeff4FeasibilityPower >= 0, "lossCoeff4FeasibilityPower must be >= 0");
+    assert.ok(lossCoeff4OtherLoss >= 0, "lossCoeff4OtherLoss must be >= 0");
+    assert.ok(lossCoeff4Random >= 0, "lossCoeff4random must be >= 0");
     assert.ok(softmaxInvTemp > 0, "softmaxInvTemp must be > 0");
     assert.ok(0 <= rescalingDegree <= 1, "rescalingDegree must be in 0...1");
   
@@ -315,22 +320,20 @@ var makeMDPAgentSatisfia = function(params_, world) {
       return squared(varianceOfDelta(state, action)) * (3 + excessKurtosisOfDelta(state, action));
     });
   
-    // TODO: replace Q2,V2, Q3,V3, by similar functions representing variance and skewness directly? 
-  
     // Expected squared total, for computing the variance of total:
     // ! recursive function:
     var Q2 = dp.cache(function(state, action, aleph){
       if (debug) console.log("  Q2", state, action, aleph);
       return expectation(Infer({ model() {
         var Edel = expectedDelta(state, action),
-            EdelSq = expectedDeltaSquared(state, action);
+            Edel2 = expectedDeltaSquared(state, action);
         if (state.terminateAfterAction){
-          return EdelSq;
+          return Edel2;
         } else {
           var nextState = transition(state, action),
               nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
           // TODO: verify formula:
-          return EdelSq + 2*Edel*V(nextState, nextAleph) + V2(nextState, nextAleph); // ! recursion here !
+          return Edel2 + 2*Edel*V(nextState, nextAleph) + V2(nextState, nextAleph); // ! recursion here !
         }
       }}));
     });
@@ -358,7 +361,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
           var nextState = transition(state, action),
               nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
           // TODO: verify formula:
-          return Edel3 + 3*Edel2*V(nextState, nextAleph) + 3*Edel*V2(nextState, nextAleph) + V3(nextState, nextAleph); // ! recursion here !
+          return Edel3 + 3*Edel2*V(nextState, nextAleph) 
+                 + 3*Edel*V2(nextState, nextAleph) + V3(nextState, nextAleph); // ! recursion here !
         }
       }}));
     });
@@ -387,7 +391,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
           var nextState = transition(state, action),
               nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
           // TODO: verify formula:
-          return Edel4 + 4*Edel3*V(nextState, nextAleph) + 6*Edel2*V2(nextState, nextAleph) + 4*Edel*V3(nextState, nextAleph) + V4(nextState, nextAleph); // ! recursion here !
+          return Edel4 + 4*Edel3*V(nextState, nextAleph) 
+                 + 6*Edel2*V2(nextState, nextAleph) 
+                 + 4*Edel*V3(nextState, nextAleph) + V4(nextState, nextAleph); // ! recursion here !
         }
       }}));
     });
@@ -401,6 +407,94 @@ var makeMDPAgentSatisfia = function(params_, world) {
       }}));
     });
   
+    // Expected fifth power of total, for computing the bed-and-banks loss component based on a 6th order polynomial potential of this shape: https://www.wolframalpha.com/input?i=plot+%28x%2B1%29%C2%B3%28x-1%29%C2%B3+ :
+    // ! recursive function:
+    var Q5 = dp.cache(function(state, action, aleph){
+      if (debug) console.log("  Q5", state, action, aleph);
+      return expectation(Infer({ model() {
+        var Edel = expectedDelta(state, action),
+            Edel2 = expectedDeltaSquared(state, action),
+            Edel3 = expectedDeltaCube(state, action),
+            Edel4 = expectedDeltaFourth(state, action),
+            Edel5 = expectedDeltaFifth(state, action);
+        if (state.terminateAfterAction){
+          return Edel5;
+        } else {
+          var nextState = transition(state, action),
+              nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
+          // TODO: verify formula:
+          return Edel5 + 5*Edel4*V(nextState, nextAleph) + 10*Edel3*V2(nextState, nextAleph) 
+                 + 10*Edel2*V3(nextState, nextAleph) + 5*Edel*V4(nextState, nextAleph) + V5(nextState, nextAleph); // ! recursion here !
+        }
+      }}));
+    });
+    // ! recursive function:
+    var V5 = dp.cache(function(state, aleph){
+      if (debug) console.log("  V5", state, aleph);
+      return expectation(Infer({ model() {
+        return Q5(state,  // ! recursion here !
+                  sample(localPolicy(state, aleph)),  // ! recursion here !
+                  aleph);
+      }}));
+    });
+    
+    // Expected sixth power of total, for computing the bed-and-banks loss component based on a 6th order polynomial potential of this shape: https://www.wolframalpha.com/input?i=plot+%28x%2B1%29%C2%B3%28x-1%29%C2%B3+ :
+    // ! recursive function:
+    var Q6 = dp.cache(function(state, action, aleph){
+      if (debug) console.log("  Q6", state, action, aleph);
+      return expectation(Infer({ model() {
+        var Edel = expectedDelta(state, action),
+            Edel2 = expectedDeltaSquared(state, action),
+            Edel3 = expectedDeltaCube(state, action),
+            Edel4 = expectedDeltaFourth(state, action),
+            Edel5 = expectedDeltaFifth(state, action),
+            Edel6 = expectedDeltaSixth(state, action);
+        if (state.terminateAfterAction){
+          return Edel6;
+        } else {
+          var nextState = transition(state, action),
+              nextAleph = propagateAspiration(state, aleph, action, Edel, nextState);
+          // TODO: verify formula:
+          return Edel6 + 6*Edel5*V(nextState, nextAleph) + 15*Edel4*V2(nextState, nextAleph) 
+                 + 20*Edel3*V3(nextState, nextAleph) 
+                 + 15*Edel2*V4(nextState, nextAleph) + 6*Edel*V5(nextState, nextAleph) + V6(nextState, nextAleph); // ! recursion here !
+        }
+      }}));
+    });
+    // ! recursive function:
+    var V6 = dp.cache(function(state, aleph){
+      if (debug) console.log("  V6", state, aleph);
+      return expectation(Infer({ model() {
+        return Q6(state,  // ! recursion here !
+                  sample(localPolicy(state, aleph)),  // ! recursion here !
+                  aleph);
+      }}));
+    });
+
+    // Expected powers of difference between total and some target value v,
+    // needed for calculating moments of probabilistic policies in loss function:
+    var Qv = dp.cache(function(s /*state*/, a /*action*/, al /*aleph*/, v){
+        return Q(s,a,al) - v;
+    });
+    var Q2v = dp.cache(function(s, a, al, v){
+        return Q2(s,a,al) - 2*Q(s,a,al)*v + squared(v);
+    });
+    var Q3v = dp.cache(function(s, a, al, v){
+        return Q3(s,a,al) - 3*Q2(s,a,al)*v + 3*Q(s,a,al)*squared(v) - cubed(v);
+    });
+    var Q4v = dp.cache(function(s, a, al, v){
+        return Q4(s,a,al) - 4*Q3(s,a,al)*v + 6*Q2(s,a,al)*squared(v) - 4*Q(s,a,al)*cubed(v) + Math.pow(v,4);
+    });
+    var Q5v = dp.cache(function(s, a, al, v){
+        return Q5(s,a,al) - 5*Q4(s,a,al)*v + 10*Q3(s,a,al)*squared(v) 
+               - 10*Q2(s,a,al)*cubed(v) + 5*Q(s,a,al)*Math.pow(v,4) - Math.pow(v,5);
+    });
+    var Q6v = dp.cache(function(s, a, al, v){
+        return Q6(s,a,al) - 6*Q5(s,a,al)*v + 15*Q4(s,a,al)*squared(v)
+               - 20*Q3(s,a,al)*cubed(v) 
+               + 15*Q2(s,a,al)*Math.pow(v,4) - 6*Q(s,a,al)*Math.pow(v,5) + Math.pow(v,6);
+    });
+    
     // TODO: verify the formulas for expected Delta variation along a trajectory:
     // Expected total of squared Deltas, for computing the expected Delta variation along a trajectory:
     // ! recursive function:
@@ -626,33 +720,38 @@ var makeMDPAgentSatisfia = function(params_, world) {
   
     // combined loss:
     // ! recursive function:
-    var combinedLoss = dp.cache(function(state, action, aleph, v, q, actionProbability) { 
-      var q_ones = lossCoeff4DeltaVariation > 0 ? Q_ones(state, action, aleph) : undefined;
+    var combinedLoss = dp.cache(function(s /*state*/, a /*action*/, al /*aleph*/, v, q, p /*actionProbability*/) { 
+      var q_ones = lossCoeff4DeltaVariation > 0 ? Q_ones(s, a, al) : undefined,
+          loHi = asInterval(al), lo = loHi[0], hi = loHi[1];
       return (
-        (lossCoeff4variance > 0 ? lossCoeff4variance * (
-            Q2(state, action, aleph) - 2*q*v + squared(v)
+        (lossCoeff4BedNBanks > 0 ? lossCoeff4BedNBanks * (
+            - 3*squared(lo*hi)*(lo+hi)*Qv(s,a,al,v) + 3*lo*hi*(squared(lo)+3*lo*hi+squared(hi))*Q2v(s,a,al,v) 
+            - (cubed(lo)+9*squared(lo)*hi+9*lo*squared(hi)+cubed(hi))*Q3v(s,a,al,v) 
+            + 3*(squared(lo)+3*lo*hi+squared(hi))*Q4v(s,a,al,v) - 3*(lo+hi)*Q5v(s,a,al,v) + Q6v(s,a,al,v)
           ) : 0) // ! recursion here !
-        + (lossCoeff4fourth > 0 ? lossCoeff4fourth * (
-            Q4(state, action, aleph) - 4*v*Q3(state, action, aleph) + 6*squared(v)*Q2(state, action, aleph) 
-              - 4*cubed(v)*q + Math.pow(v, 4)
+        + (lossCoeff4Variance > 0 ? lossCoeff4Variance * (
+            Q2v(s, a, al, v)
+          ) : 0) // ! recursion here !
+        + (lossCoeff4Fourth > 0 ? lossCoeff4Fourth * (
+            Q4v(s, a, al, v)
           ) : 0) // ! recursion here ! 
         + (lossCoeff4DeltaVariation > 0 ? lossCoeff4DeltaVariation * (
-            Q_DeltaSquare(state, action, aleph) / q_ones -  Q2(state, action, aleph) / squared(q_ones)
+            Q_DeltaSquare(s, a, al) / q_ones -  Q2(s, a, al) / squared(q_ones)
           ) : 0) // ! recursion here !
-        + (lossCoeff4LRA > 0 ? lossCoeff4LRA * LRAdev_action(state, action, aleph) : 0)
-        + (lossCoeff4MP > 0 ? lossCoeff4MP * messingPotential_action(state, action) : 0)
-        + (lossCoeff4KLdiv > 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(state, actionProbability, action, aleph) : 0) 
-        + (lossCoeff4entropy > 0 ? lossCoeff4entropy * behaviorEntropy_action(state, actionProbability, action, aleph) : 0)
-        + (lossCoeff4feasibilityPower > 0 ? lossCoeff4feasibilityPower * squared(maxFeasibleQ(state, action) - minFeasibleQ(state, action)) : 0)
-        + (otherLocalLoss && (lossCoeff4otherLoss > 0) ? lossCoeff4otherLoss * otherLoss_action(state, action, aleph) : 0)
-        + (lossCoeff4random > 0 ? lossCoeff4random * randomTieBreaker(state, action) : 0)
+        + (lossCoeff4LRA > 0 ? lossCoeff4LRA * LRAdev_action(s, a, al) : 0)
+        + (lossCoeff4MP > 0 ? lossCoeff4MP * messingPotential_action(s, a) : 0)
+        + (lossCoeff4KLdiv > 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(s, p, a, al) : 0) 
+        + (lossCoeff4Entropy > 0 ? lossCoeff4Entropy * behaviorEntropy_action(s, p, a, al) : 0)
+        + (lossCoeff4FeasibilityPower > 0 ? lossCoeff4FeasibilityPower * squared(maxFeasibleQ(s, a) - minFeasibleQ(s, a)) : 0)
+        + (otherLocalLoss && (lossCoeff4OtherLoss > 0) ? lossCoeff4otherLoss * otherLoss_action(s, a, al) : 0)
+        + (lossCoeff4Random > 0 ? lossCoeff4Random * randomTieBreaker(s, a) : 0)
       );
     });
     // TODO: add further criteria, like:
     // - estd. probability of actual total being in aspiration interval
     // - using same action as last step
     // - using "simple" policies
-  
+
     return { 
       minFeasibleQ, maxFeasibleQ, minFeasibleV, maxFeasibleV,
       localPolicy, localPolicyData,
