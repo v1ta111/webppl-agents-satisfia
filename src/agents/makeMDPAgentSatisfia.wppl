@@ -721,8 +721,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // combined loss:
     // ! recursive function:
     var combinedLoss = dp.cache(function(s /*state*/, a /*action*/, al /*aleph*/, v, q, p /*actionProbability*/) { 
-      var q_ones = lossCoeff4DeltaVariation > 0 ? Q_ones(s, a, al) : undefined,
-          loHi = asInterval(al), lo = loHi[0], hi = loHi[1];
+      var q_ones = lossCoeff4DeltaVariation > 0 ? Q_ones(s, a, al) : undefined;
+      // set the zero locations of the BedNBanks loss potential so that its slope 
+      // at the aspiration interval boundaries is larger than anywhere inside the interval,
+      // meaning that moving probability mass out of the interval cannot be made up by 
+      // moving other probability mass around inside the interval:
+      var alI = asInterval(al), lo = interpolate(alI[0], 0.1, alI[1]), hi = interpolate(alI[0], 0.9, alI[1]);
       return (
         (lossCoeff4BedNBanks > 0 ? lossCoeff4BedNBanks * (
             - 3*squared(lo*hi)*(lo+hi)*Qv(s,a,al,v) + 3*lo*hi*(squared(lo)+3*lo*hi+squared(hi))*Q2v(s,a,al,v) 
