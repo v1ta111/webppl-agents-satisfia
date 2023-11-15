@@ -9,7 +9,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var params = extend(extend({
       maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)
       minLambda: 0, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-      lossCoeff4BedNBanks: 1, // weight of BedNBanks loss component, must be >= 0
+      lossCoeff4Cup: 1, // weight of "cup" loss component, must be >= 0
       lossCoeff4Variance: 0, // weight of variance of total in loss function, must be >= 0
       lossCoeff4Fourth: 0, // weight of centralized fourth moment of total in loss function, must be >= 0
       lossCoeff4DeltaVariation: 0, // weight of variation of Delta in loss function, must be >= 0
@@ -49,7 +49,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         internalActionEntropy = params.internalActionEntropy,  // function(state, action)
         internalTransitionEntropy = params.internalTransitionEntropy,  // function(state, action, nextState)
         otherLocalLoss = params.otherLossIncrement,  // function(state, action, aleph, v, q, p)
-        lossCoeff4BedNBanks = params.lossCoeff4BedNBanks,
+        lossCoeff4Cup = params.lossCoeff4Cup,
         lossCoeff4Variance = params.lossCoeff4Variance,
         lossCoeff4Fourth = params.lossCoeff4Fourth,
         lossCoeff4DeltaVariation = params.lossCoeff4DeltaVariation,
@@ -66,7 +66,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var options = params.options, 
         debug = options.debug;
   
-    assert.ok(lossCoeff4BedNBanks >= 0, "lossCoeff4BedNBanks must be >= 0");
+    assert.ok(lossCoeff4Cup >= 0, "lossCoeff4Cup must be >= 0");
     assert.ok(lossCoeff4Variance >= 0, "lossCoeff4variance must be >= 0");
     assert.ok(lossCoeff4Fourth >= 0, "lossCoeff4Fourth must be >= 0");
     assert.ok(lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
@@ -473,22 +473,33 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
     // Expected powers of difference between total and some target value v,
     // needed for calculating moments of probabilistic policies in loss function:
-    var Qv = dp.cache(function(s /*state*/, a /*action*/, al /*aleph*/, v){
-        return Q(s,a,al) - v;
-    });
+
+    /* currently unused:
+        var Qv = dp.cache(function(s, // state
+                                a, // action
+                                al, // aleph
+                                v // target value
+                ){
+            return Q(s,a,al) - v;
+        });
+    */
     var Q2v = dp.cache(function(s, a, al, v){
         return Q2(s,a,al) - 2*Q(s,a,al)*v + squared(v);
     });
-    var Q3v = dp.cache(function(s, a, al, v){
-        return Q3(s,a,al) - 3*Q2(s,a,al)*v + 3*Q(s,a,al)*squared(v) - cubed(v);
-    });
+    /*
+        var Q3v = dp.cache(function(s, a, al, v){
+            return Q3(s,a,al) - 3*Q2(s,a,al)*v + 3*Q(s,a,al)*squared(v) - cubed(v);
+        });
+    */
     var Q4v = dp.cache(function(s, a, al, v){
         return Q4(s,a,al) - 4*Q3(s,a,al)*v + 6*Q2(s,a,al)*squared(v) - 4*Q(s,a,al)*cubed(v) + Math.pow(v,4);
     });
-    var Q5v = dp.cache(function(s, a, al, v){
-        return Q5(s,a,al) - 5*Q4(s,a,al)*v + 10*Q3(s,a,al)*squared(v) 
-               - 10*Q2(s,a,al)*cubed(v) + 5*Q(s,a,al)*Math.pow(v,4) - Math.pow(v,5);
-    });
+    /*    
+        var Q5v = dp.cache(function(s, a, al, v){
+            return Q5(s,a,al) - 5*Q4(s,a,al)*v + 10*Q3(s,a,al)*squared(v) 
+                - 10*Q2(s,a,al)*cubed(v) + 5*Q(s,a,al)*Math.pow(v,4) - Math.pow(v,5);
+        }); 
+    */
     var Q6v = dp.cache(function(s, a, al, v){
         return Q6(s,a,al) - 6*Q5(s,a,al)*v + 15*Q4(s,a,al)*squared(v)
                - 20*Q3(s,a,al)*cubed(v) 
@@ -721,17 +732,14 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // combined loss:
     // ! recursive function:
     var combinedLoss = dp.cache(function(s /*state*/, a /*action*/, al /*aleph*/, v, q, p /*actionProbability*/) { 
-      var q_ones = lossCoeff4DeltaVariation > 0 ? Q_ones(s, a, al) : undefined;
-      // set the zero locations of the BedNBanks loss potential so that its slope 
-      // at the aspiration interval boundaries is larger than anywhere inside the interval,
-      // meaning that moving probability mass out of the interval cannot be made up by 
-      // moving other probability mass around inside the interval:
-      var alI = asInterval(al), lo = interpolate(alI[0], 0.1, alI[1]), hi = interpolate(alI[0], 0.9, alI[1]);
+      var q_ones = lossCoeff4DeltaVariation > 0 ? Q_ones(s, a, al) : undefined,
+          alI = asInterval(al);
       return (
-        (lossCoeff4BedNBanks > 0 ? lossCoeff4BedNBanks * (
-            - 3*squared(lo*hi)*(lo+hi)*Qv(s,a,al,v) + 3*lo*hi*(squared(lo)+3*lo*hi+squared(hi))*Q2v(s,a,al,v) 
-            - (cubed(lo)+9*squared(lo)*hi+9*lo*squared(hi)+cubed(hi))*Q3v(s,a,al,v) 
-            + 3*(squared(lo)+3*lo*hi+squared(hi))*Q4v(s,a,al,v) - 3*(lo+hi)*Q5v(s,a,al,v) + Q6v(s,a,al,v)
+        (lossCoeff4Cup > 0 ? lossCoeff4Cup * (
+            // loss based on a "cup" shaped potential centered at the mid-point of the aspiration interval
+            // that is almost completely flat in the middle half of the interval 
+            // (https://www.wolframalpha.com/input?i=plot+%28x-.5%29%5E6+from+0+to+1):
+            Q6v(s, a, al, (alI[0] + alI[1]) / 2)
           ) : 0) // ! recursion here !
         + (lossCoeff4Variance > 0 ? lossCoeff4Variance * (
             Q2v(s, a, al, v)
