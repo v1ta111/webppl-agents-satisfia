@@ -3,8 +3,9 @@
 
 var makeMDPAgentSatisfia = function(params_, world) {
 
-    var metalog = getMetalog(); // needed to enable metalog distribution used in loss function
-
+    // uncomment later once we want to do anything with the metalog distribution:
+    // var metalog = getMetalog(); // needed to enable metalog distribution used in loss function
+    
     // extend default parameters and options by supplied ones:
     var params = extend(extend({
       maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)
