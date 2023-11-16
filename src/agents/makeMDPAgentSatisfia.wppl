@@ -21,6 +21,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       lossCoeff4FeasibilityPower: 0, // weight of power of squared feasibility interval width in loss function, must be >= 0
       lossCoeff4OtherLoss: 0, // weight of other loss components specified by otherLossIncrement, must be >= 0
       lossCoeff4Random: 1e-10, // weight of random tie breaker in loss function, must be >= 0
+      allowNegativeCoeffs: false, // if true, allow negative loss coefficients
       onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
       softmaxInvTemp: 1, // inverse temperature of softmax mixture of actions, must be > 0
       rescalingDegree: 1, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
@@ -61,23 +62,24 @@ var makeMDPAgentSatisfia = function(params_, world) {
         lossCoeff4FeasibilityPower = params.lossCoeff4FeasibilityPower,
         lossCoeff4OtherLoss = params.lossCoeff4OtherLoss,
         lossCoeff4Random = params.lossCoeff4Random,
+        allowNegativeCoeffs = params.allowNegativeCoeffs,
         onlyUseClosestActions = params.onlyUseClosestActions,
         softmaxInvTemp = params.softmaxInvTemp,
         rescalingDegree = params.rescalingDegree;
     var options = params.options, 
         debug = options.debug;
   
-    assert.ok(lossCoeff4Cup >= 0, "lossCoeff4Cup must be >= 0");
-    assert.ok(lossCoeff4Variance >= 0, "lossCoeff4variance must be >= 0");
-    assert.ok(lossCoeff4Fourth >= 0, "lossCoeff4Fourth must be >= 0");
-    assert.ok(lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
-    assert.ok(lossCoeff4LRA >= 0, "lossCoeff4LRA must be >= 0");
-    assert.ok(lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
-    assert.ok(lossCoeff4Entropy >= 0, "lossCoeff4entropy must be >= 0");
-    assert.ok(lossCoeff4KLdiv >= 0, "lossCoeff4KLdiv must be >= 0");
-    assert.ok(lossCoeff4FeasibilityPower >= 0, "lossCoeff4FeasibilityPower must be >= 0");
-    assert.ok(lossCoeff4OtherLoss >= 0, "lossCoeff4OtherLoss must be >= 0");
-    assert.ok(lossCoeff4Random >= 0, "lossCoeff4random must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4Cup >= 0, "lossCoeff4Cup must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4Variance >= 0, "lossCoeff4variance must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4Fourth >= 0, "lossCoeff4Fourth must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4LRA >= 0, "lossCoeff4LRA must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4Entropy >= 0, "lossCoeff4entropy must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4KLdiv >= 0, "lossCoeff4KLdiv must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4FeasibilityPower >= 0, "lossCoeff4FeasibilityPower must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4OtherLoss >= 0, "lossCoeff4OtherLoss must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4Random >= 0, "lossCoeff4random must be >= 0");
     assert.ok(softmaxInvTemp > 0, "softmaxInvTemp must be > 0");
     assert.ok(0 <= rescalingDegree <= 1, "rescalingDegree must be in 0...1");
   
@@ -116,10 +118,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // ! recursive function:
     var localPolicy = function(state, aleph) {
       var policyData = localPolicyData(state, aleph);
+      if (debug) console.log(" localPolicy", state, aleph, policyData);
       return Categorical({vs: policyData[0], ps: policyData[1]});
     }
     var localPolicyData = dp.cache(function(state, aleph){
-      if (debug) console.log(" localPolicy", state, aleph);
       // The following quantities are potentially intervals: aleph, v, Qstate(a)
   
       // Use aspiration aleph to set the desired expected total for this state before (!) having chosen an action:
@@ -167,13 +169,18 @@ var makeMDPAgentSatisfia = function(params_, world) {
         // Calculate loss for each action:          
         var lossHi = function(a) { return combinedLoss(state, a, aleph, vMid, approxQHi, approxP); },
             lossLo = function(a) { return combinedLoss(state, a, aleph, vMid, approxQLo, 1-approxP); };
+        if (debug) console.log("  approxQHi, approxQLo, approxP, actionsHi, lossHi, actionsLo, lossLo", approxQHi, approxQLo, approxP, actionsHi, map(lossHi, actionsHi), actionsLo, map(lossLo, actionsLo));
         // Construct softmax distributions localPolicyHi, localPolicyLo over actionsHi, actionsLo:
         var defaultPolicy = uninformedPolicy ? uninformedPolicy(state) : undefined,
             probabilityFct = function(a) {
-              return Math.exp((defaultPolicy ? defaultPolicy.score(a) : 0) - softmaxInvTemp * lossHi(a))
+              var res = Math.exp((defaultPolicy ? defaultPolicy.score(a) : 0) - softmaxInvTemp * lossHi(a));
+              return res < Infinity ? res : 1e10;
             },
-            localPolicyHi = Categorical({vs: actionsHi, ps: map(probabilityFct, actionsHi)}),
-            localPolicyLo = Categorical({vs: actionsLo, ps: map(probabilityFct, actionsLo)}); 
+            psHi = map(probabilityFct, actionsHi),
+            psLo = map(probabilityFct, actionsLo);
+        if (debug) console.log("  psHi, psLo", psHi, psLo);
+        var localPolicyHi = Categorical({vs: actionsHi, ps: psHi}),
+            localPolicyLo = Categorical({vs: actionsLo, ps: psLo});  
         // Calculate the true qHi, qLo, and p from these distributions:
         var qHi = expectation(localPolicyHi, QstateMid),
             qLo = expectation(localPolicyLo, QstateMid),
@@ -242,20 +249,23 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // When using action in state, we can get any expected total in the interval
     // [minFeasibleQ(state, action), maxFeasibleQ(state, action)].
     var aspiration4action = dp.cache(function(state, action, aleph4state){
-      if (debug) console.log("  getAspiration4action", state, action, aleph4state)
       var qLo = minFeasibleQ(state, action),
           qHi = maxFeasibleQ(state, action);
       if (!_.isArray(aleph4state)) {
         // So when having aspiration aleph, we can still fulfill it in expectation if it lies in the interval.
         // Therefore, when using action in state at aspiration aleph, 
         // we set our aspiration when choosing this action to aleph clipped to that interval:
-        return clip(qLo, aleph4state, qHi);
+        var res = clip(qLo, aleph4state, qHi);
+        if (debug) console.log("  aspiration4action", state, action, aleph4state, res);
+        return res;
       } else {
         // For interval aleph, we choose an interval that guarantees that the resulting mixed interval of all
         // localPolicies that localPolicy() may mix with this action will be within aleph: 
-        var alephLo = aleph4state[0], alephHi = aleph4state[1], width = alephHi - alephLo;
-        return [Math.max(qLo, Math.min(alephLo, qHi - width)), 
-                Math.min(qHi, Math.max(alephHi, qLo + width))];
+        var alephLo = aleph4state[0], alephHi = aleph4state[1], width = alephHi - alephLo,
+            res = [Math.max(qLo, Math.min(alephLo, qHi - width)), 
+                   Math.min(qHi, Math.max(alephHi, qLo + width))];
+        if (debug) console.log("  aspiration4action", state, action, aleph4state, res);
+        return res;
       }
     });
     // When in state, we can get any expected total in the interval
@@ -265,7 +275,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // we adjust our aspiration to aleph clipped to that interval:
     var aspiration4state = dp.cache(function(state, propagatedAleph){
       var res = clip(minFeasibleV(state), propagatedAleph, maxFeasibleV(state));
-      if (debug) console.log("  getAspiration4state", state, propagatedAleph, res);
+      if (debug) console.log("  aspiration4state", state, propagatedAleph, res);
       return res;
     });
   
@@ -560,9 +570,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     });
   
     var propagateAspiration = // dp.cache(  // caching this easy to compute function would only clutter the cache due to its many arguments
-     function(state, aleph, action, Edel, nextState){
-      if (debug) console.log(" propagateAspiration", state, aleph, action, Edel, nextState);
-  
+     function(state, aleph, action, Edel, nextState){  
       // the propagated aspiration is a mixture of a steadfast and a rescaled part:
   
       var steadfastAleph4nextState = _.isArray(aleph) 
@@ -570,7 +578,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
             : aleph - Edel;
   
       if (rescalingDegree == 0.0) {
-        return steadfastAleph4nextState;
+        var res = steadfastAleph4nextState;
+        if (debug) console.log(" propagateAspiration", state, aleph, action, Edel, nextState, res);
+        return res;
       } else {
         // recover the aspiration that we had after choosing action, before knowing which state we would land in:
         // (Note: We have E(q | action ~ localPolicy) = v) by construction of localPolicy in getLocaPolicy().)
@@ -584,7 +594,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
         // rescale the target to the feasibility interval of the state that we landed in:
         var rescaledAleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
         // (only this part preserves aspiration in expectation)
-        return interpolate(steadfastAleph4nextState, rescalingDegree, rescaledAleph4nextState);      
+        var res = interpolate(steadfastAleph4nextState, rescalingDegree, rescaledAleph4nextState);      
+        if (debug) console.log(" propagateAspiration", state, aleph, action, Edel, nextState, res);
+        return res;
       }
      }
     // )
@@ -646,7 +658,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       return res;
     });
   
-    // KL divergence of behavior relative to refPolicy:
+    // KL divergence of behavior relative to refPolicy (or uninformedPolicy if refPolicy is undefined):
     // recursive function:
     var behaviorKLdiv_state = dp.cache(function(state, aleph) {
       var localPolicy = localPolicy(state, aleph); // ! recursion here !
@@ -657,8 +669,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
     });
     // recursive function:
     var behaviorKLdiv_action = dp.cache(function(state, actionProbability, action, aleph) {
-      var ref = refPolicy(state),
-          res = expectation(Infer({ model() {
+      var ref = refPolicy ? refPolicy(state) : uninformedPolicy ? uninformedPolicy(state) : undefined;
+      if (refPolicy) {
+        var res = expectation(Infer({ model() {
             var localDivergence = Math.log(actionProbability) - ref.score(action);
             if (state.terminateAfterAction){
               return localDivergence;
@@ -668,7 +681,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
               return localDivergence + behaviorKLdiv_state(nextState, nextAleph); // ! recursion here !
             }
           }}));
-      return res;
+        return res;
+      } else {
+        return undefined;
+      }
     });
   
     // state's messing potential (maximal entropy (relative to some uninformedStatePrior) 
@@ -734,31 +750,31 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // combined loss:
     // ! recursive function:
     var combinedLoss = dp.cache(function(s /*state*/, a /*action*/, al /*aleph*/, v, q, p /*actionProbability*/) { 
-      var q_ones = lossCoeff4DeltaVariation > 0 ? Q_ones(s, a, al) : undefined,
+      var q_ones = lossCoeff4DeltaVariation != 0 ? Q_ones(s, a, al) : undefined,
           alI = asInterval(al);
       return (
-        (lossCoeff4Cup > 0 ? lossCoeff4Cup * (
+        (lossCoeff4Cup != 0 ? lossCoeff4Cup * (
             // loss based on a "cup" shaped potential centered at the mid-point of the aspiration interval
             // that is almost completely flat in the middle half of the interval 
             // (https://www.wolframalpha.com/input?i=plot+%28x-.5%29%5E6+from+0+to+1):
             Q6v(s, a, al, (alI[0] + alI[1]) / 2)
           ) : 0) // ! recursion here !
-        + (lossCoeff4Variance > 0 ? lossCoeff4Variance * (
+        + (lossCoeff4Variance != 0 ? lossCoeff4Variance * (
             Q2v(s, a, al, v)
           ) : 0) // ! recursion here !
-        + (lossCoeff4Fourth > 0 ? lossCoeff4Fourth * (
+        + (lossCoeff4Fourth != 0 ? lossCoeff4Fourth * (
             Q4v(s, a, al, v)
           ) : 0) // ! recursion here ! 
-        + (lossCoeff4DeltaVariation > 0 ? lossCoeff4DeltaVariation * (
+        + (lossCoeff4DeltaVariation != 0 ? lossCoeff4DeltaVariation * (
             Q_DeltaSquare(s, a, al) / q_ones -  Q2(s, a, al) / squared(q_ones)
           ) : 0) // ! recursion here !
-        + (lossCoeff4LRA > 0 ? lossCoeff4LRA * LRAdev_action(s, a, al) : 0)
-        + (lossCoeff4MP > 0 ? lossCoeff4MP * messingPotential_action(s, a) : 0)
-        + (lossCoeff4KLdiv > 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(s, p, a, al) : 0) 
-        + (lossCoeff4Entropy > 0 ? lossCoeff4Entropy * behaviorEntropy_action(s, p, a, al) : 0)
-        + (lossCoeff4FeasibilityPower > 0 ? lossCoeff4FeasibilityPower * squared(maxFeasibleQ(s, a) - minFeasibleQ(s, a)) : 0)
-        + (otherLocalLoss && (lossCoeff4OtherLoss > 0) ? lossCoeff4otherLoss * otherLoss_action(s, a, al) : 0)
-        + (lossCoeff4Random > 0 ? lossCoeff4Random * randomTieBreaker(s, a) : 0)
+        + (lossCoeff4LRA != 0 ? lossCoeff4LRA * LRAdev_action(s, a, al) : 0)
+        + (lossCoeff4MP != 0 ? lossCoeff4MP * messingPotential_action(s, a) : 0)
+        + (lossCoeff4KLdiv != 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(s, p, a, al) : 0) 
+        + (lossCoeff4Entropy != 0 ? lossCoeff4Entropy * behaviorEntropy_action(s, p, a, al) : 0)
+        + (lossCoeff4FeasibilityPower != 0 ? lossCoeff4FeasibilityPower * squared(maxFeasibleQ(s, a) - minFeasibleQ(s, a)) : 0)
+        + (otherLocalLoss && (lossCoeff4OtherLoss != 0) ? lossCoeff4otherLoss * otherLoss_action(s, a, al) : 0)
+        + (lossCoeff4Random != 0 ? lossCoeff4Random * randomTieBreaker(s, a) : 0)
       );
     });
     // TODO: add further criteria, like:

@@ -26,25 +26,26 @@ var env = getEnv(),
     KLdiv = agent.behaviorKLdiv_state;
 
 // Generate and draw a trajectory:
-var simulate = function(state, aleph) {
-  if (options.debug) console.log("simulate", state, aleph);
+var simulate = function(state, aleph, _t) {
+  var t = _t ? _t : 0;
+  if (options.debug) console.log("simulate", state, aleph, t);
   var localPolicy = localPolicy(state, aleph),
       action = sample(localPolicy),
-      r = expectedDelta(state, action);
-  console.log(localPolicy.params);
+      Edel = expectedDelta(state, action);
+  console.log(t, localPolicy.params, action, Edel, state.terminateAfterAction);
   var sa = [state, action];
   if (state.terminateAfterAction) {
     return { 
       trajectory: [sa], // sequence of [state, action] pairs
-      conditionalExpectedIndicator: r // expected indicator conditional on this trajectory
+      conditionalExpectedIndicator: Edel // expected indicator conditional on this trajectory
     };
   } else {
     var nextState = transition(state, action),
-        nextAleph = propagateAspiration(state, aleph, action, r, nextState),
-        nextOut = simulate(nextState, nextAleph);
+        nextAleph = propagateAspiration(state, aleph, action, Edel, nextState),
+        nextOut = simulate(nextState, nextAleph, t+1);
     return { 
       trajectory: [sa].concat(nextOut.trajectory), 
-      conditionalExpectedIndicator: r + nextOut.conditionalExpectedIndicator
+      conditionalExpectedIndicator: Edel + nextOut.conditionalExpectedIndicator
     };
   }
 };

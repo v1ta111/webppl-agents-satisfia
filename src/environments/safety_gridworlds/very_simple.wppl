@@ -40,8 +40,8 @@ var VerySimpleGW1 = function() {
       f0 = world.feature, 
       feature = function(s) {return extend(f0(s), {test: "TODO: what does this do?"})},
       expectedDelta = tableToExpectedDeltaFct(expectedDeltaTable, feature),
-      uninformedPolicy = UniformGridPolicy(),
-      refPolicy = uninformedPolicy,
+      uninformedPolicy = undefined,
+      refPolicy = UniformGridPolicy(),
       aleph0 = 2
       ;
   return { world, expectedDelta, uninformedPolicy, refPolicy, startState, aleph0 };

@@ -53,8 +53,7 @@ var tableToExpectedDeltaFct = function(table, feature) {
 
 var UniformPolicy = function(actions) {
     return function(unused_state) {
-        var empty = actions.slice(), ps = empty.fill(1/actions.length);
-        return Categorical({vs: actions, ps: ps});
+        return Infer({ model() { return uniformDraw(actions); }});
       };
 };
 
