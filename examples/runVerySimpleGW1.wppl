@@ -1,0 +1,66 @@
+var env = getEnv(),
+    params = extend({
+      // some env-specific parameter settings
+    }, env.argv),
+    options = extend({
+//      debug: true
+      // some env-specific option settings
+    }, env.argv),
+    mdp = VerySimpleGW1(),
+    world = mdp.world,
+    transition = world.transition,
+    expectedDelta = mdp.expectedDelta,
+    uninformedPolicy = mdp.uninformedPolicy,
+    refPolicy = mdp.refPolicy,
+    startState = mdp.startState,
+    aleph0 = mdp.aleph0,
+    agent = makeMDPAgentSatisfia(extend(params, {
+      expectedDelta, uninformedPolicy, refPolicy, aleph0, options
+    }), world),
+    localPolicy = agent.localPolicy, 
+    propagateAspiration = agent.propagateAspiration,
+    getAspiration4state = agent.getAspiration4state, 
+    V = agent.V, 
+    V2 = agent.V2,
+    entropy = agent.behaviorEntropy_state, 
+    KLdiv = agent.behaviorKLdiv_state;
+
+// Generate and draw a trajectory:
+var simulate = function(state, aleph) {
+  if (options.debug) console.log("simulate", state, aleph);
+  var localPolicy = localPolicy(state, aleph),
+      action = sample(localPolicy),
+      r = expectedDelta(state, action);
+  console.log(localPolicy.params);
+  var sa = [state, action];
+  if (state.terminateAfterAction) {
+    return { 
+      trajectory: [sa], // sequence of [state, action] pairs
+      conditionalExpectedIndicator: r // expected indicator conditional on this trajectory
+    };
+  } else {
+    var nextState = transition(state, action),
+        nextAleph = propagateAspiration(state, aleph, action, r, nextState),
+        nextOut = simulate(nextState, nextAleph);
+    return { 
+      trajectory: [sa].concat(nextOut.trajectory), 
+      conditionalExpectedIndicator: r + nextOut.conditionalExpectedIndicator
+    };
+  }
+};
+
+// calculate expected return and return std.dev. by using the inbuilt expectation function:
+
+var expectedIndicator = expectation(Infer({ model() {
+  return simulate(mdp.startState, aleph0).conditionalExpectedIndicator;
+}}));
+console.log("in expectation, we desired indicator", aleph0, "and actually get", expectedIndicator);
+
+console.log("Entropy of policy is", entropy(mdp.startState, aleph0));
+console.log("KL divergence from reference policy is", KLdiv(mdp.startState, aleph0));
+
+if (env.inBrowser) {
+  // simulate and show a single trajectory:
+  var out = simulate(mdp.startState, aleph0);
+  viz.gridworld(world, { trajectory: map(first, out.trajectory) })
+}

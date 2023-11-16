@@ -27,6 +27,7 @@
       "src/environments/makeGridWorldMDP.wppl",
       "src/environments/makeBanditPOMDP.wppl",
       "src/environments/makeGridWorldPOMDP.wppl",
+      "src/environments/safety_gridworlds/very_simple.wppl",
       "src/agents/makeMDPAgent.wppl",
       "src/agents/makeMDPAgentSatisfia.wppl",
       "src/agents/makePOMDPAgent.wppl",

@@ -108,7 +108,7 @@ var agent = makeMDPAgentSatisfia(extend(params, {
 // extract its methods:
 var localPolicy = agent.localPolicy, propagateAspiration = agent.propagateAspiration,
     aspiration4state = agent.aspiration4state, 
-    G3 = agent.V, V2 = agent.V2,
+    V = agent.V, V2 = agent.V2,
     behaviorEntropy_state = agent.behaviorEntropy_state, behaviorKLdiv_state = agent.behaviorKLdiv_state;
 
 // Generate and draw a trajectory:

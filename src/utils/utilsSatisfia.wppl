@@ -1,82 +1,98 @@
 var asInterval = function(x) { return _.isArray(x) ? x : [x,x]; };
 
 var interpolate = function(x, lam, y) {
-// this is denoted  x : lam : y  in formulas
-if (_.isArray(x) || _.isArray(lam) || _.isArray(y)) {
-    // one argument is an interval, so everything becomes an interval:
-    var xx = asInterval(x), lamlam = asInterval(lam), yy = asInterval(y);
-    return [xx[0] + lamlam[0] * (yy[0] - xx[0]), 
-            xx[1] + lamlam[1] * (yy[1] - xx[1])];
-} else {
-    return x + lam * (y - x);
-}
+    // this is denoted  x : lam : y  in formulas
+    if (_.isArray(x) || _.isArray(lam) || _.isArray(y)) {
+        // one argument is an interval, so everything becomes an interval:
+        var xx = asInterval(x), lamlam = asInterval(lam), yy = asInterval(y);
+        return [xx[0] + lamlam[0] * (yy[0] - xx[0]), 
+                xx[1] + lamlam[1] * (yy[1] - xx[1])];
+    } else {
+        return x + lam * (y - x);
+    }
 }
 
 var relativePosition = function(x, z, y) {
-// this is denoted  x \ z \ y  in formulas
-if (_.isArray(x) || _.isArray(z) || _.isArray(y)) {
-    // one argument is an interval, so everything becomes an interval:
-    var xx = asInterval(x), zz = asInterval(z), yy = asInterval(y);
-    return [yy[0] != xx[0] ? (zz[0] - xx[0]) / (yy[0] - xx[0]) : 0.5, 
-            yy[1] != xx[1] ? (zz[1] - xx[1]) / (yy[1] - xx[1]) : 0.5];
-} else {
-    return y != x ? (z - x) / (y - x) : 0.5;
-}
+    // this is denoted  x \ z \ y  in formulas
+    if (_.isArray(x) || _.isArray(z) || _.isArray(y)) {
+        // one argument is an interval, so everything becomes an interval:
+        var xx = asInterval(x), zz = asInterval(z), yy = asInterval(y);
+        return [yy[0] != xx[0] ? (zz[0] - xx[0]) / (yy[0] - xx[0]) : 0.5, 
+                yy[1] != xx[1] ? (zz[1] - xx[1]) / (yy[1] - xx[1]) : 0.5];
+    } else {
+        return y != x ? (z - x) / (y - x) : 0.5;
+    }
 }
 
 var clip = function(x, z, y) {
-// this is denoted  x[ z ]y  in formulas
-if (_.isArray(x) || _.isArray(z) || _.isArray(y)) {
-    // one argument is an interval, so everything becomes an interval:
-    var xx = asInterval(x), zz = asInterval(z), yy = asInterval(y);
-    return [Math.min(Math.max(xx[0], zz[0]), yy[0]),
-            Math.min(Math.max(xx[1], zz[1]), yy[1])];
-} else {
-    return Math.min(Math.max(x, z), y);
-}
+    // this is denoted  x[ z ]y  in formulas
+    if (_.isArray(x) || _.isArray(z) || _.isArray(y)) {
+        // one argument is an interval, so everything becomes an interval:
+        var xx = asInterval(x), zz = asInterval(z), yy = asInterval(y);
+        return [Math.min(Math.max(xx[0], zz[0]), yy[0]),
+                Math.min(Math.max(xx[1], zz[1]), yy[1])];
+    } else {
+        return Math.min(Math.max(x, z), y);
+    }
 }
 
 var intersect = function(interval1, interval2) {
-// do the two intervals intersect in at least one point?
-return (interval1[0] <= interval2[1]) && (interval2[0] <= interval1[1]);
+    // do the two intervals intersect in at least one point?
+    return (interval1[0] <= interval2[1]) && (interval2[0] <= interval1[1]);
 }
 
 var squared = function(x) { return x*x; },
     cubed = function(x) { return Math.pow(x, 3); };
 
+var tableToExpectedDeltaFct = function(table, feature) {
+    return function(state, unused_action) {
+        var f = feature(state), stateFeatureName = f.name, inc = stateFeatureName ? table[stateFeatureName] : table[f['0']];
+        return inc;
+    };
+};
+
+var UniformPolicy = function(actions) {
+    return function(unused_state) {
+        var empty = actions.slice(), ps = empty.fill(1/actions.length);
+        return Categorical({vs: actions, ps: ps});
+      };
+};
+
+var UniformGridPolicy = function() { return UniformPolicy(["u", "d", "l", "r"]); };
+
 // functions for the exponentially modified Gaussian distribution:
 
 // estimation of parameters from first three moments:
 var expModGaussianParms = dp.cache(function(M1, M2, M3) {
-/*
-    (skewness/2)^(-2/3) = z + 1, where z = sigma²lambda²
-    variance = sigma²(1 + 1/z)
-    mean = mu + 1/lambda
-*/
-var variance = M2 - squared(M1),
-    skewness = (M3 - 3*M1*variance - cubed(M1)) / Math.pow(variance, 1.5),
-    z = squared(Math.pow(skewness/2, -1/3)) - 1;
-assert.ok(z > 0, "Incompatible skewness >=2 or <=-2");
-var sigma = Math.sqrt(variance / (1 + 1/z)),
-    lambda = Math.sign(skewness) * Math.sqrt(z) / sigma,
-    mu = M1 - 1/lambda;
-return {mu, sigma, lambda};
+    /*
+        (skewness/2)^(-2/3) = z + 1, where z = sigma²lambda²
+        variance = sigma²(1 + 1/z)
+        mean = mu + 1/lambda
+    */
+    var variance = M2 - squared(M1),
+        skewness = (M3 - 3*M1*variance - cubed(M1)) / Math.pow(variance, 1.5),
+        z = squared(Math.pow(skewness/2, -1/3)) - 1;
+    assert.ok(z > 0, "Incompatible skewness >=2 or <=-2");
+    var sigma = Math.sqrt(variance / (1 + 1/z)),
+        lambda = Math.sign(skewness) * Math.sqrt(z) / sigma,
+        mu = M1 - 1/lambda;
+    return {mu, sigma, lambda};
 });
 // CDF:
 var expModGaussianCDF = function(parms, x) {
-var sigma2 = squared(parms.sigma);
-return GaussianCDF(x, parms.mu, parms.sigma) 
-    - (Math.exp(parms.lambda*(2*parms.mu + parms.lambda*sigma2 - 2*x) / 2)) 
-    * (1 - Math.erf(
-            (parms.mu + parms.lambda*sigma2 - x) 
-            / (Math.sqrt(2)*parms.sigma)
-        )) 
-    / 2;
+    var sigma2 = squared(parms.sigma);
+    return GaussianCDF(x, parms.mu, parms.sigma) 
+        - (Math.exp(parms.lambda*(2*parms.mu + parms.lambda*sigma2 - 2*x) / 2)) 
+        * (1 - Math.erf(
+                (parms.mu + parms.lambda*sigma2 - x) 
+                / (Math.sqrt(2)*parms.sigma)
+            )) 
+        / 2;
 };
 // probability of falling into interval:
-var expModGaussianPInterval = function(M1, M2, M3, lo, hi) {
-var parms = expModGaussianParms(M1, M2, M3);
-return expModGaussianCDF(parms, hi) - expModGaussianCDF(parms, lo);
+    var expModGaussianPInterval = function(M1, M2, M3, lo, hi) {
+        var parms = expModGaussianParms(M1, M2, M3);
+        return expModGaussianCDF(parms, hi) - expModGaussianCDF(parms, lo);
 };
 
 /* TODO: rather use the metalog distribution, which is more flexible, 

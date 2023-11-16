@@ -631,7 +631,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // recursive function:
     var behaviorEntropy_action = dp.cache(function(state, actionProbability, action, aleph) {
       var res = expectation(Infer({ model() {
-            var localEntropy = (uninformedPolicy ? uninformedPolicy(state).score(action) : 0) 
+            var defaultPolicy = uninformedPolicy ? uninformedPolicy(state) : undefined,
+                localEntropy = (defaultPolicy ? defaultPolicy.score(action) : 0) 
                     - Math.log(actionProbability)
                     + (internalActionEntropy ? internalActionEntropy(state, action) : 0);
             if (state.terminateAfterAction){
