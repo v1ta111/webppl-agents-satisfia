@@ -6,6 +6,61 @@ module.exports = {
 
     setFrom: (arg) => new Set(arg),
 
+    trajDist2locActionFreqs: function (trajDist) {
+        console.log("typeof trajDist", typeof(trajDist));
+        var locActionFreqs = {};
+        for (var [trajString, val] of Object.entries(trajDist)) {
+            var traj = JSON.parse(trajString), prob = val.prob;
+            console.log("traj", traj, typeof(traj), "prob", prob); 
+            for (var sa of traj) {
+                var state = sa[0], action = sa[1], loc = JSON.stringify(state.loc);
+                var freq = locActionFreqs[loc];
+                console.log("state", state, "loc", loc, "action", action, "freq", freq);
+                if (!freq) {
+                    freq = {};
+                    locActionFreqs[loc] = freq;
+                }
+                freq[action] = (freq[action] || 0) + prob;
+            }
+        }
+        console.log("locActionFreqs", locActionFreqs);
+        return locActionFreqs;
+    },
+
+    plotLocActionFreqs: function (locActionFreqs) {
+        var locs = Object.keys(locActionFreqs).map((l) => JSON.parse(l)), 
+            xs = locs.map((l) => l[0]), ys = locs.map((l) => l[1]),
+            minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+        console.log("xs", xs, "ys", ys, "minX", minX, "maxX", maxX, "minY", minY, "maxY", maxY);
+        var asciiArt = "";
+        var format = (x) => (x > 5e-3) ? (Math.round(x * 100) / 100).toFixed(2) : "    "; // up to two decimal places if > 0.005, otherwise whitespace
+        for (var y = maxY; y >= minY; y--) {
+            console.log("y", y);
+            for (var x = minX; x <= maxX; x++) {
+                asciiArt += "+--------------";
+            }
+            asciiArt += "+\n";
+            for (var x = minX; x <= maxX; x++) {
+                asciiArt += "|     " + format((locActionFreqs[JSON.stringify([x, y])] || {})["u"]) + "     ";
+            }
+            asciiArt += "|\n";
+            for (var x = minX; x <= maxX; x++) {
+                asciiArt += "| " + format((locActionFreqs[JSON.stringify([x, y])] || {})["l"]) 
+                            + "    " + format((locActionFreqs[JSON.stringify([x, y])] || {})["r"]) + " ";
+            }
+            asciiArt += "|\n";
+            for (var x = minX; x <= maxX; x++) {
+                asciiArt += "|     " + format((locActionFreqs[JSON.stringify([x, y])] || {})["d"]) + "     ";
+            }
+            asciiArt += "|\n";
+        }
+        for (var x = minX; x <= maxX; x++) {
+            asciiArt += "+--------------";
+        }
+        asciiArt += "+\n";
+    console.log(asciiArt);
+    },
+
     // TO BE MOVED TO src/utils/metalog.js:
 
     /* TODO:

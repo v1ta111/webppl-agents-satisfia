@@ -124,7 +124,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // ! recursive function:
     var localPolicy = function(state, aleph) {
       var policyData = localPolicyData(state, aleph);
-      if (debug) console.log(" localPolicy", pretty(state), aleph, policyData);
+      if (debug) console.log(" localPolicy", pretty(state), aleph, pretty(policyData));
       return Categorical({vs: policyData[0], ps: policyData[1]});
     }
     var localPolicyData = dp.cache(function(state, aleph){

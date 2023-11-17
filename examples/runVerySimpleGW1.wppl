@@ -59,8 +59,9 @@ console.log(agentData);
 
 var trajDist = Infer({ model() {
   return simulate(mdp.startState, aleph0).trajectory;
-}});
-console.log("trajDist", trajDist.getDist());
+}}).getDist();
+console.log("trajDist", trajDist);
+webpplAgents.plotLocActionFreqs(webpplAgents.trajDist2locActionFreqs(trajDist));
 
 assert.ok(false);
 
