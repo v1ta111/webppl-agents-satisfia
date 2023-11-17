@@ -1,3 +1,5 @@
+var pretty = function (x) { JSON.stringify(x, null, 0); };
+
 var asInterval = function(x) { return _.isArray(x) ? x : [x,x]; };
 
 var interpolate = function(x, lam, y) {

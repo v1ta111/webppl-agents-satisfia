@@ -28,11 +28,11 @@ var env = getEnv(),
 // Generate and draw a trajectory:
 var simulate = function(state, aleph, _t) {
   var t = _t ? _t : 0;
-  if (options.debug) console.log("simulate", state, aleph, t);
+  if (options.debug) console.log("simulate", pretty(state), aleph, t);
   var localPolicy = localPolicy(state, aleph),
       action = sample(localPolicy),
       Edel = expectedDelta(state, action);
-  console.log(t, localPolicy.params, action, Edel, state.terminateAfterAction);
+  console.log(t, pretty(state), localPolicy.params, action, Edel, state.terminateAfterAction);
   var sa = [state, action];
   if (state.terminateAfterAction) {
     return { 
@@ -49,6 +49,20 @@ var simulate = function(state, aleph, _t) {
     };
   }
 };
+
+// simulate a single trajectory:
+simulate(mdp.startState, aleph0);
+var gd = agent.getData, agentData = gd();
+console.log(agentData);
+
+// estimate distribution of trajectories:
+
+var trajDist = Infer({ model() {
+  return simulate(mdp.startState, aleph0).trajectory;
+}});
+console.log("trajDist", trajDist.getDist());
+
+assert.ok(false);
 
 // calculate expected return and return std.dev. by using the inbuilt expectation function:
 

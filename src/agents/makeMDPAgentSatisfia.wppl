@@ -6,6 +6,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // uncomment later once we want to do anything with the metalog distribution:
     // var metalog = getMetalog(); // needed to enable metalog distribution used in loss function
     
+    var stateActionPairsSet = webpplAgents.emptySet(); // to be able to later loop over all state-action pairs visited
+
     // extend default parameters and options by supplied ones:
     var params = extend(extend({
       maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)
@@ -39,10 +41,14 @@ var makeMDPAgentSatisfia = function(params_, world) {
           || function(state, action) { return 0; },  // function(state, action)
         excessKurtosisOfDelta = params.excessKurtosisOfDelta
           || function(state, action) { return 0; },  // function(state, action)
-        expectedDeltaFifth = params.expectedDeltaFifth
-          || function(state, action) { return 0; },  // function(state, action)
-        expectedDeltaSixth = params.expectedDeltaSixth
-          || function(state, action) { return 0; },  // function(state, action)
+        fifthMomentOfDelta = params.fifthMomentOfDelta
+          || function(state, action) { 
+            return 8*Math.pow(varianceOfDelta(state, action),2.5); // this assumes a Gaussian distribution
+          },  // function(state, action)
+        sixthMomentOfDelta = params.sixthMomentOfDelta
+          || function(state, action) { 
+            return 15*Math.pow(varianceOfDelta(state, action),3); // this assumes a Gaussian distribution
+          },  // function(state, action)
         minLambda = params.minLambda, 
         maxLambda = params.maxLambda,
         uninformedStatePriorScore = params.uninformedStatePriorScore,
@@ -118,7 +124,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // ! recursive function:
     var localPolicy = function(state, aleph) {
       var policyData = localPolicyData(state, aleph);
-      if (debug) console.log(" localPolicy", state, aleph, policyData);
+      if (debug) console.log(" localPolicy", pretty(state), aleph, policyData);
       return Categorical({vs: policyData[0], ps: policyData[1]});
     }
     var localPolicyData = dp.cache(function(state, aleph){
@@ -174,7 +180,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var defaultPolicy = uninformedPolicy ? uninformedPolicy(state) : undefined,
             probabilityFct = function(a) {
               var res = Math.exp((defaultPolicy ? defaultPolicy.score(a) : 0) - softmaxInvTemp * lossHi(a));
-              return res < Infinity ? res : 1e10;
+              return res < Infinity ? (res > 0 ? res : 1e-10) : 1e10;
             },
             psHi = map(probabilityFct, actionsHi),
             psLo = map(probabilityFct, actionsLo);
@@ -202,13 +208,15 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // or of the LRA-based problem (if maxLambda<1):
     // ! recursive function:
     var maxFeasibleQ = dp.cache(function(state, action){
+      // TODO: register (state, action) in global store
+      stateActionPairsSet.add([state,action]);
       var Edel = expectedDelta(state, action),
           q = state.terminateAfterAction 
               ? Edel 
               : Edel + expectation(Infer({ model() { 
                 return maxFeasibleV(transition(state, action));  // ! recursion here ! 
               }}));
-      if (debug) console.log("   maxFeasibleQ", state, action, q);
+      if (debug) console.log("   maxFeasibleQ", pretty(state), action, q);
       return q;
     });
     // ! recursive function:
@@ -218,7 +226,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           v = maxLambda == 1 
               ? maxWith(Qstate, actions)[1] 
               : interpolate(minWith(Qstate, actions)[1], maxLambda, maxWith(Qstate, actions)[1]);
-      if (debug) console.log("   maxFeasibleV", state, v);
+      if (debug) console.log("   maxFeasibleV", pretty(state), v);
       return v;
     });
   
@@ -232,7 +240,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
               : Edel + expectation(Infer({ model() { 
                 return minFeasibleV(transition(state, action));  // ! recursion here !
               }}));
-      if (debug) console.log("   minFeasibleQ", state, action, q);
+      if (debug) console.log("   minFeasibleQ", pretty(state), action, q);
       return q;
     });
     // ! recursive function:
@@ -242,7 +250,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           v = minLambda == 0 
               ? minWith(Qstate, actions)[1] 
               : interpolate(minWith(Qstate, actions)[1], minLambda, maxWith(Qstate, actions)[1]);
-      if (debug) console.log("   minFeasibleV", state, v);
+      if (debug) console.log("   minFeasibleV", pretty(state), v);
       return v;
     });
   
@@ -256,7 +264,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         // Therefore, when using action in state at aspiration aleph, 
         // we set our aspiration when choosing this action to aleph clipped to that interval:
         var res = clip(qLo, aleph4state, qHi);
-        if (debug) console.log("  aspiration4action", state, action, aleph4state, res);
+        if (debug) console.log("  aspiration4action", pretty(state), action, aleph4state, res);
         return res;
       } else {
         // For interval aleph, we choose an interval that guarantees that the resulting mixed interval of all
@@ -264,7 +272,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var alephLo = aleph4state[0], alephHi = aleph4state[1], width = alephHi - alephLo,
             res = [Math.max(qLo, Math.min(alephLo, qHi - width)), 
                    Math.min(qHi, Math.max(alephHi, qLo + width))];
-        if (debug) console.log("  aspiration4action", state, action, aleph4state, res);
+        if (debug) console.log("  aspiration4action", pretty(state), action, aleph4state, res);
         return res;
       }
     });
@@ -275,15 +283,14 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // we adjust our aspiration to aleph clipped to that interval:
     var aspiration4state = dp.cache(function(state, propagatedAleph){
       var res = clip(minFeasibleV(state), propagatedAleph, maxFeasibleV(state));
-      if (debug) console.log("  aspiration4state", state, propagatedAleph, res);
+      if (debug) console.log("  aspiration4state", pretty(state), propagatedAleph, res);
       return res;
     });
   
     // Actual Q and V functions of resulting policy (always returning scalars):
     // ! recursive function:
     var Q = dp.cache(function(state, action, aleph){
-      if (debug) console.log("  Q", state, action, aleph);
-      return expectation(Infer({ model() {
+      var q = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action);
         if (state.terminateAfterAction){
           return Edel;
@@ -293,16 +300,19 @@ var makeMDPAgentSatisfia = function(params_, world) {
           return Edel + V(nextState, nextAleph);  // ! recursion here !
         }
       }})); 
+      if (debug) console.log("  Q", pretty(state), action, aleph, q);
+      return q;
     });
     // TODO: fix the Infinity error for GW6, webppl --require webppl-dp --require webppl-json --require . restaurant_choice.wppl -- --aleph0 2  --maxLambda 1.0 --minLambda 0.3 --debug 1
     // ! recursive function:
     var V = dp.cache(function(state, aleph){
-      if (debug) console.log("  V", state, aleph);
-      return expectation(Infer({ model() { 
+      var v = expectation(Infer({ model() { 
         return Q(state,  // ! recursion here !
                  sample(localPolicy(state, aleph)),  // ! recursion here ! 
                  aleph);
       }}));
+      if (debug) console.log("  V", pretty(state), aleph, v);
+      return v;
     });
   
     // TODO: why does the following not work?
@@ -320,22 +330,36 @@ var makeMDPAgentSatisfia = function(params_, world) {
   
     var expectedDeltaSquared = dp.cache(function(state, action){
       var Edel = expectedDelta(state, action);
-      return squared(Edel) + varianceOfDelta(state, action);
+      return varianceOfDelta(state, action) + squared(Edel);
     });
-    var expectedDeltaCube = dp.cache(function(state, action){
+    var expectedDeltaCubed = dp.cache(function(state, action){
       var Edel = expectedDelta(state, action),
           varDel = varianceOfDelta(state, action);
       return Math.pow(varDel, 1.5)*skewnessOfDelta(state, action) + 3*Edel*varDel + Math.pow(Edel, 3);
     });
-    var expectedDeltaFourth = dp.cache(function(state, action){
-      return squared(varianceOfDelta(state, action)) * (3 + excessKurtosisOfDelta(state, action));
+    var expectedDeltaFourth = dp.cache(function(s, a){
+      var Edel = expectedDelta(s, a);
+      return squared(varianceOfDelta(s, a)) * (3 + excessKurtosisOfDelta(s, a))
+             + 4*expectedDeltaCubed(s, a)*Edel - 6*expectedDeltaSquared(s, a)*squared(Edel) + 3*Math.pow(Edel, 4);
+    });
+    var expectedDeltaFifth= dp.cache(function(s, a){
+      var Edel = expectedDelta(s, a);
+      return fifthMomentOfDelta(s, a)
+             + 5*expectedDeltaFourth(s, a)*Edel - 10*expectedDeltaCubed(s, a)*squared(Edel) 
+             + 10*expectedDeltaSquared(s, a)*cubed(Edel) - 4*Math.pow(Edel, 5);
+    });
+    var expectedDeltaSixth = dp.cache(function(s, a){
+      var Edel = expectedDelta(s, a);
+      return sixthMomentOfDelta(s, a)
+             + 6*expectedDeltaFifth(s, a)*Edel - 15*expectedDeltaFourth(s, a)*squared(Edel) 
+             + 20*expectedDeltaCubed(s, a)*cubed(Edel) 
+             - 15*expectedDeltaSquared(s, a)*Math.pow(Edel, 4) + 5*Math.pow(Edel, 6);
     });
   
     // Expected squared total, for computing the variance of total:
     // ! recursive function:
     var Q2 = dp.cache(function(state, action, aleph){
-      if (debug) console.log("  Q2", state, action, aleph);
-      return expectation(Infer({ model() {
+      var q2 = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action),
             Edel2 = expectedDeltaSquared(state, action);
         if (state.terminateAfterAction){
@@ -347,25 +371,27 @@ var makeMDPAgentSatisfia = function(params_, world) {
           return Edel2 + 2*Edel*V(nextState, nextAleph) + V2(nextState, nextAleph); // ! recursion here !
         }
       }}));
+      if (debug) console.log("  Q2", pretty(state), action, aleph, q2);
+      return q2;
     });
     // ! recursive function:
     var V2 = dp.cache(function(state, aleph){
-      if (debug) console.log("  V2", state, aleph);
-      return expectation(Infer({ model() { 
+      var v2 = expectation(Infer({ model() { 
         return Q2(state,  // ! recursion here !
                   sample(localPolicy(state, aleph)),  // ! recursion here !
                   aleph); 
       }}));
+      if (debug) console.log("  V2", pretty(state), aleph, v2);
+      return v2;
     });
   
     // Similarly: Expected third and fourth powers of total, for computing the 3rd and 4th centralized moment of total:
     // ! recursive function:
     var Q3 = dp.cache(function(state, action, aleph){
-      if (debug) console.log("  Q3", state, action, aleph);
-      return expectation(Infer({ model() {
+      var q3 = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action),
             Edel2 = expectedDeltaSquared(state, action),
-            Edel3 = expectedDeltaCube(state, action);
+            Edel3 = expectedDeltaCubed(state, action);
         if (state.terminateAfterAction){
           return Edel3;
         } else {
@@ -376,25 +402,27 @@ var makeMDPAgentSatisfia = function(params_, world) {
                  + 3*Edel*V2(nextState, nextAleph) + V3(nextState, nextAleph); // ! recursion here !
         }
       }}));
+      if (debug) console.log("  Q3", pretty(state), action, aleph, q3);
+      return q3;
     });
     // ! recursive function:
     var V3 = dp.cache(function(state, aleph){
-      if (debug) console.log("  V3", state, aleph);
-      return expectation(Infer({ model() {
+      var v3 = expectation(Infer({ model() {
         return Q3(state,  // ! recursion here !
                   sample(localPolicy(state, aleph)),  // ! recursion here !
                   aleph);
       }}));
+      if (debug) console.log("  V3", pretty(state), aleph, v3);
+      return v3;
     });
   
     // Expected fourth power of total, for computing the expected fourth power of deviation of total from expected total (= fourth centralized moment of total):
     // ! recursive function:
     var Q4 = dp.cache(function(state, action, aleph){
-      if (debug) console.log("  Q4", state, action, aleph);
-      return expectation(Infer({ model() {
+      var q4 = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action),
             Edel2 = expectedDeltaSquared(state, action),
-            Edel3 = expectedDeltaCube(state, action),
+            Edel3 = expectedDeltaCubed(state, action),
             Edel4 = expectedDeltaFourth(state, action);
         if (state.terminateAfterAction){
           return Edel4;
@@ -407,25 +435,27 @@ var makeMDPAgentSatisfia = function(params_, world) {
                  + 4*Edel*V3(nextState, nextAleph) + V4(nextState, nextAleph); // ! recursion here !
         }
       }}));
+      if (debug) console.log("  Q4", pretty(state), action, aleph, q4);
+      return q4;
     });
     // ! recursive function:
     var V4 = dp.cache(function(state, aleph){
-      if (debug) console.log("  V4", state, aleph);
-      return expectation(Infer({ model() {
+      var v4 = expectation(Infer({ model() {
         return Q4(state,  // ! recursion here !
                   sample(localPolicy(state, aleph)),  // ! recursion here !
                   aleph);
       }}));
+      if (debug) console.log("  V4", pretty(state), aleph, v4);
+      return v4;
     });
   
     // Expected fifth power of total, for computing the bed-and-banks loss component based on a 6th order polynomial potential of this shape: https://www.wolframalpha.com/input?i=plot+%28x%2B1%29%C2%B3%28x-1%29%C2%B3+ :
     // ! recursive function:
     var Q5 = dp.cache(function(state, action, aleph){
-      if (debug) console.log("  Q5", state, action, aleph);
-      return expectation(Infer({ model() {
+      var q5 = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action),
             Edel2 = expectedDeltaSquared(state, action),
-            Edel3 = expectedDeltaCube(state, action),
+            Edel3 = expectedDeltaCubed(state, action),
             Edel4 = expectedDeltaFourth(state, action),
             Edel5 = expectedDeltaFifth(state, action);
         if (state.terminateAfterAction){
@@ -438,25 +468,27 @@ var makeMDPAgentSatisfia = function(params_, world) {
                  + 10*Edel2*V3(nextState, nextAleph) + 5*Edel*V4(nextState, nextAleph) + V5(nextState, nextAleph); // ! recursion here !
         }
       }}));
+      if (debug) console.log("  Q5", pretty(state), action, aleph, q5);
+      return q5;
     });
     // ! recursive function:
     var V5 = dp.cache(function(state, aleph){
-      if (debug) console.log("  V5", state, aleph);
-      return expectation(Infer({ model() {
+      var v5 = expectation(Infer({ model() {
         return Q5(state,  // ! recursion here !
                   sample(localPolicy(state, aleph)),  // ! recursion here !
                   aleph);
       }}));
+      if (debug) console.log("  V5", pretty(state), aleph, v5);
+      return v5;
     });
     
     // Expected sixth power of total, for computing the bed-and-banks loss component based on a 6th order polynomial potential of this shape: https://www.wolframalpha.com/input?i=plot+%28x%2B1%29%C2%B3%28x-1%29%C2%B3+ :
     // ! recursive function:
     var Q6 = dp.cache(function(state, action, aleph){
-      if (debug) console.log("  Q6", state, action, aleph);
-      return expectation(Infer({ model() {
+      var q6 = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action),
             Edel2 = expectedDeltaSquared(state, action),
-            Edel3 = expectedDeltaCube(state, action),
+            Edel3 = expectedDeltaCubed(state, action),
             Edel4 = expectedDeltaFourth(state, action),
             Edel5 = expectedDeltaFifth(state, action),
             Edel6 = expectedDeltaSixth(state, action);
@@ -471,15 +503,18 @@ var makeMDPAgentSatisfia = function(params_, world) {
                  + 15*Edel2*V4(nextState, nextAleph) + 6*Edel*V5(nextState, nextAleph) + V6(nextState, nextAleph); // ! recursion here !
         }
       }}));
+      if (debug) console.log("  Q6", pretty(state), action, aleph, q6);
+      return q6;
     });
     // ! recursive function:
     var V6 = dp.cache(function(state, aleph){
-      if (debug) console.log("  V6", state, aleph);
-      return expectation(Infer({ model() {
+      var v6 = expectation(Infer({ model() {
         return Q6(state,  // ! recursion here !
                   sample(localPolicy(state, aleph)),  // ! recursion here !
                   aleph);
       }}));
+      if (debug) console.log("  V6", pretty(state), aleph, v6);
+      return v6;
     });
 
     // Expected powers of difference between total and some target value v,
@@ -521,8 +556,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // Expected total of squared Deltas, for computing the expected Delta variation along a trajectory:
     // ! recursive function:
     var Q_DeltaSquare = dp.cache(function(state, action, aleph){
-      if (debug) console.log("  Q_DeltaSquare", state, action, aleph);
-      return expectation(Infer({ model() {
+      var qDsq = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action),
             EdelSq = squared(Edel) + varianceOfDelta(state, action);
         if (state.terminateAfterAction){
@@ -533,22 +567,24 @@ var makeMDPAgentSatisfia = function(params_, world) {
           return EdelSq + V_DeltaSquare(nextState, nextAleph);  // ! recursion here !
         }
       }}));
+      if (debug) console.log("  Q_DeltaSquare", pretty(state), action, aleph, qDsq);
+      return qDsq;
     });
     // ! recursive function:
     var V_DeltaSquare = dp.cache(function(state, aleph){
-      if (debug) console.log("  V_DeltaSquare", state, aleph);
-      return expectation(Infer({ model() { 
+      var vDsq = expectation(Infer({ model() { 
         return Q_DeltaSquare(state,  // ! recursion here !
                              sample(localPolicy(state, aleph)),  // ! recursion here ! 
                              aleph);
       }}));
+      if (debug) console.log("  V_DeltaSquare", pretty(state), aleph, vDsq);
+      return vDsq;
     });
   
     // Expected total of ones (= expected length of trajectory), for computing the expected Delta variation along a trajectory:
     // ! recursive function:
     var Q_ones = dp.cache(function(state, action, aleph){
-      if (debug) console.log("  Q_ones", state, action, aleph);
-      return expectation(Infer({ model() {
+      var q_ones = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action);
         if (state.terminateAfterAction){
           return 1;
@@ -558,15 +594,18 @@ var makeMDPAgentSatisfia = function(params_, world) {
           return 1 + V_ones(nextState, nextAleph);  // ! recursion here !
         }
       }}));
+      if (debug) console.log("  Q_ones", pretty(state), action, aleph, q_ones);
+      return q_ones;
     });
     // ! recursive function:
     var V_ones = dp.cache(function(state, aleph){
-      if (debug) console.log("  V_ones", state, aleph);
-      return expectation(Infer({ model() { 
+      var v_ones = expectation(Infer({ model() { 
         return Q_ones(state,  // ! recursion here !
                      sample(localPolicy(state, aleph)),  // ! recursion here ! 
                      aleph);
       }}));
+      if (debug) console.log("  V_ones", pretty(state), aleph, v_ones);
+      return v_ones;
     });
   
     var propagateAspiration = // dp.cache(  // caching this easy to compute function would only clutter the cache due to its many arguments
@@ -579,7 +618,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   
       if (rescalingDegree == 0.0) {
         var res = steadfastAleph4nextState;
-        if (debug) console.log(" propagateAspiration", state, aleph, action, Edel, nextState, res);
+        if (debug) console.log(" propagateAspiration", pretty(state), aleph, action, Edel, pretty(nextState), res);
         return res;
       } else {
         // recover the aspiration that we had after choosing action, before knowing which state we would land in:
@@ -595,7 +634,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var rescaledAleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
         // (only this part preserves aspiration in expectation)
         var res = interpolate(steadfastAleph4nextState, rescalingDegree, rescaledAleph4nextState);      
-        if (debug) console.log(" propagateAspiration", state, aleph, action, Edel, nextState, res);
+        if (debug) console.log(" propagateAspiration", pretty(state), aleph, action, Edel, pretty(nextState), res);
         return res;
       }
      }
@@ -782,6 +821,13 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // - using same action as last step
     // - using "simple" policies
 
+    var getData = function() {
+      var stateActionPairs = Array.from(stateActionPairsSet),
+          states = Array.from(webpplAgents.setFrom(map(function(pair) { return pair[0]; }, stateActionPairs)));
+      // TODO: locs etc.
+      return { states, stateActionPairs };
+    };
+
     return { 
       minFeasibleQ, maxFeasibleQ, minFeasibleV, maxFeasibleV,
       localPolicy, localPolicyData,
@@ -790,6 +836,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       messingPotential_state, messingPotential_action,
       behaviorEntropy_state, behaviorEntropy_action, 
       behaviorKLdiv_state, behaviorKLdiv_action, otherLoss_state, otherLoss_action, 
-      combinedLoss
+      combinedLoss,
+      getData
     };
 };

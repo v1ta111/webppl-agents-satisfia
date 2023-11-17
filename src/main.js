@@ -2,6 +2,10 @@
 
 module.exports = {
 
+    emptySet: () => new Set(),
+
+    setFrom: (arg) => new Set(arg),
+
     // TO BE MOVED TO src/utils/metalog.js:
 
     /* TODO:
