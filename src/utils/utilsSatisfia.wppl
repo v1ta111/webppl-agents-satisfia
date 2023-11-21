@@ -61,6 +61,31 @@ var UniformPolicy = function(actions) {
 
 var UniformGridPolicy = function() { return UniformPolicy(["u", "d", "l", "r"]); };
 
+var stateActionFct2table = function(stateActionFct, stateActionPairs) {
+    return map(function(stateActionPair) { return stateActionFct(stateActionPair[0], stateActionPair[1]); }, stateActionPairs);
+};
+
+var stateActionFct2locActionData = function(stateActionFct, stateActionPairs) {
+    var tbl = stateActionFct2table(stateActionFct, stateActionPairs);
+    return webpplAgents.locActionData2ASCII(webpplAgents.stateActionData2locActionData(tbl, stateActionPairs));
+};
+
+var trajDist2TrajData = function(trajDist, agent) {
+    var keys = Object.keys(trajDist), V = agent.V, Q = agent.Q; 
+    return map(function(key) { 
+        var traj = JSON.parse(key);
+        return map(function(stepData) {
+            var state = stepData.state, aleph=stepData.aleph, action = stepData.action, Edel = stepData.Edel;
+            return {
+                aleph,
+                V: V(state, aleph),
+                Q: Q(state, action, aleph)
+            };
+        }, traj);
+    }, keys);
+};
+
+
 // functions for the exponentially modified Gaussian distribution:
 
 // estimation of parameters from first three moments:

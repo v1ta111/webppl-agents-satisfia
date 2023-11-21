@@ -103,11 +103,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
           → aspiration4action
             → minFeasibleQ, maxFeasibleQ
           → combinedLoss
-            → Q, Q2, Q_DeltaSquare, Q_ones
+            → Q, .., Q6, Q_DeltaSquare, Q_ones
               → propagateAspiration (see below)
-              → E(V), E(V2), E(V_DeltaSquare), E(V_ones)
+              → E(V), ..., E(V6), E(V_DeltaSquare), E(V_ones)
                 → localPolicy (RECURSION)
-                → E(Q), E(Q2), E(Q_DeltaSquare), E(Q_ones) (RECURSION)
+                → E(Q), ..., E(Q6), E(Q_DeltaSquare), E(Q_ones) (RECURSION)
             → otherLoss_action
               → propagateAspiration (see below)
               → E(otherLoss_state)
@@ -819,13 +819,16 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // TODO: add further criteria, like:
     // - estd. probability of actual total being in aspiration interval
     // - using same action as last step
-    // - using "simple" policies
+    // - using "simple" policies (in addition to being rather deterministic)
 
     var getData = function() {
       var stateActionPairs = Array.from(stateActionPairsSet),
-          states = Array.from(webpplAgents.setFrom(map(function(pair) { return pair[0]; }, stateActionPairs)));
+          states = Array.from(webpplAgents.setFrom(map(function(pair) { return pair[0]; }, stateActionPairs))),
+          locs = map(function(state) { return state.loc; }, states);
       // TODO: locs etc.
-      return { states, stateActionPairs };
+      return { states, stateActionPairs, 
+        
+        locs };
     };
 
     return { 

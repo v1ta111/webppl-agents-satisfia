@@ -1,49 +1,77 @@
-var VerySimpleGW1 = function() {
-  /*
+var VerySimpleGW = function(gw, parms) {
 
-  Three goals G1, G2, and G3 giving Deltas of 1, 2, and 3. 
-  Aspiration: 2
-  Desired solution: go North
-  Undesired solutions: 
-  - always go West (giving too little) or always go East (giving too much)
-  - flip a coin, then go West or East (also giving 2 on average, thus fulfilling the aspiration in expectation).
-
-  #  #  #  #  #
-  #  #  G2 #  #
-  #  G1 A  G3 #
-  #  #  #  #  #
-
-  */ 
-
-  var G1 = { name : 'G1' },
-      G2 = { name : 'G2' },
-      G3 = { name : 'G3' },
-      expectedDeltaTable = {
-        'G1': 1,
-        'G2': 2,
-        'G3': 3,
-        ' ': 0
-      },
-      grid = [
-        ['#', '#', '#', '#', '#'],
-        ['#', '#',  G2, '#', '#'],
-        ['#', G1 , ' ',  G3, '#'],
-        ['#', '#', '#', '#', '#']
-      ],
-      mdp = makeGridWorldMDP({
-        grid,
-        start: [2, 1],
+  if (gw == "GW1") {
+    var G1 = { name : 'G1' },
+        G2 = { name : 'G2' },
+        G3 = { name : 'G3' };
+    return makeGW({
+        grid: [
+          ['#', '#', '#', '#', '#'],
+          ['#', '#', G2 , '#', '#'],
+          ['#', G1 , 'A', G3 , '#'],
+          ['#', '#', '#', '#', '#']
+        ],
+//        start: [2, 1],
+        expectedDeltaTable: {
+          'G1': 1,
+          'G2': 2,
+          'G3': 3,
+          ' ': 0
+        },
+        aleph0: 2,
         totalTime: 1
+      });
+    /*
+    Desired solution: go North
+    Undesired solutions: 
+    - always go West (giving too little) or always go East (giving too much)
+    - flip a coin, then go West or East (also giving 2 on average, thus fulfilling the aspiration in expectation).
+    */ 
+  } else if (gw == "GW2") {
+    var Ga = { name : 'Ga' },
+        Gb = { name : 'Gb' },
+        Gc = { name : 'Gc' },
+        deltas = JSON.parse(parms || "[1, 3, 2]");
+    return makeGW({
+        grid: [
+          ['#', '#', '#', '#', '#'],
+          ['#', ' ', ' ', ' ', '#'],
+          ['#', Ga , Gb , Gc , '#'],
+          ['#', '#', '#', '#', '#']
+        ],
+        start: [1, 2],
+        expectedDeltaTable: {
+          'Ga': deltas[0],
+          'Gb': deltas[1],
+          'Gc': deltas[2],
+          ' ': 0
+        },
+        aleph0: 2,
+        totalTime: 1
+      });
+
+  }
+};
+
+var find2D = function(a, q) {
+  var i = ([].concat.apply([], a)).indexOf(q),
+      res = [Math.floor(i / a[0].length), a.length-1 - (i % a[0].length)];
+  return res;
+};
+
+var makeGW = function(d) {
+  var mdp = makeGridWorldMDP({
+        grid: map(function (r) { return map(function (c) { return c == 'A' ? ' ' : c; }, r); }, d.grid),
+        start: d.start || find2D(d.grid, 'A'),
+        totalTime: d.totalTime
       }),
       world = mdp.world,
       startState = mdp.startState,
       f0 = world.feature, 
       feature = function(s) {return extend(f0(s), {test: "TODO: what does this do?"})},
-      expectedDelta = tableToExpectedDeltaFct(expectedDeltaTable, feature),
+      expectedDelta = tableToExpectedDeltaFct(d.expectedDeltaTable, feature),
       uninformedPolicy = undefined,
-      refPolicy = UniformGridPolicy(),
-      aleph0 = 2
+      refPolicy = UniformGridPolicy()
       ;
-  return { world, expectedDelta, uninformedPolicy, refPolicy, startState, aleph0 };
-}
-
+  return { world, expectedDelta, uninformedPolicy, refPolicy, startState, aleph0: d.aleph0 };
+};

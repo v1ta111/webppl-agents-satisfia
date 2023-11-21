@@ -1,64 +1,92 @@
 // TODO: how to move the functions to other js files and still make them available in webppl code??? 
 
+var locActionData2ASCIIdefaultFormat = function (x) {
+    // up to two decimal places if > 0.005, otherwise whitespace
+    return x == "?" ? " ?? "
+        : x > 5e-3 ? (Math.round(x * 100) / 100).toFixed(2)
+        : "    ";
+};
+
 module.exports = {
 
     emptySet: () => new Set(),
 
     setFrom: (arg) => new Set(arg),
 
-    trajDist2locActionFreqs: function (trajDist) {
-        console.log("typeof trajDist", typeof(trajDist));
-        var locActionFreqs = {};
-        for (var [trajString, val] of Object.entries(trajDist)) {
-            var traj = JSON.parse(trajString), prob = val.prob;
-            console.log("traj", traj, typeof(traj), "prob", prob); 
-            for (var sa of traj) {
-                var state = sa[0], action = sa[1], loc = JSON.stringify(state.loc);
-                var freq = locActionFreqs[loc];
-                console.log("state", state, "loc", loc, "action", action, "freq", freq);
-                if (!freq) {
-                    freq = {};
-                    locActionFreqs[loc] = freq;
-                }
+    stateActionData2locActionData: function (stateActionData, stateActionPairs) {
+        var locActionData = {};
+        for (var index in stateActionPairs) {
+            var [state, action] = stateActionPairs[index]
+            var loc = JSON.stringify(state.loc);
+            var actionData = locActionData[loc];
+            if (!actionData) {
+                actionData = {};
+                locActionData[loc] = actionData;
+            }
+            var val = stateActionData[index];
+            if (!actionData[action]) {
+                actionData[action] = val;
+            } else {
+                console.log("WARNING: multiple entries for state", state, "action", action);
+                actionData[action] = "?"; // TODO: how to handle this case?
+            }
+        }
+        return locActionData;
+    },
+
+    trajDist2LocActionData: function (trajDist, trajData) {
+        var keys = Object.keys(trajDist), V = {}, Q = {}, actionFreq = {};
+        for (var index in keys) {
+            var trajString = keys[index], data = trajData[index],
+                traj = JSON.parse(trajString), val = trajDist[trajString], prob = val.prob;
+            for (var t in traj) {
+                var stepData = traj[t], additionalData = data[t],
+                    state = stepData.state, action = stepData.action, loc = JSON.stringify(state.loc);
+                var freq = actionFreq[loc], q = Q[loc];
+                V[loc] = (V[loc] || 0) + additionalData.V * prob;
+                if (!Q[loc]) { Q[loc] = q = {}; }
+                q[action] = (q[action] || 0) + additionalData.Q * prob; // FIXME
+                if (!freq) { actionFreq[loc] = freq = {}; }
                 freq[action] = (freq[action] || 0) + prob;
             }
         }
-        console.log("locActionFreqs", locActionFreqs);
-        return locActionFreqs;
+        return { V, Q, actionFreq };
     },
 
-    plotLocActionFreqs: function (locActionFreqs) {
-        var locs = Object.keys(locActionFreqs).map((l) => JSON.parse(l)), 
+    locActionData2ASCII: function (
+            locActionData,  // object keyed by JSON.stringify([x, y]), values are objects keyed by actions "u", "d", "l", "r"
+            format = locActionData2ASCIIdefaultFormat  // optional value formatting function, should produce strings of length 4.
+    ) {
+        var locs = Object.keys(locActionData).map((l) => JSON.parse(l)), 
             xs = locs.map((l) => l[0]), ys = locs.map((l) => l[1]),
-            minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-        console.log("xs", xs, "ys", ys, "minX", minX, "maxX", maxX, "minY", minY, "maxY", maxY);
+            minX = Math.min(...xs)-1, maxX = Math.max(...xs)+1, 
+            minY = Math.min(...ys)-1, maxY = Math.max(...ys)+1;
+//        console.log("xs", xs, "ys", ys, "minX", minX, "maxX", maxX, "minY", minY, "maxY", maxY);
         var asciiArt = "";
-        var format = (x) => (x > 5e-3) ? (Math.round(x * 100) / 100).toFixed(2) : "    "; // up to two decimal places if > 0.005, otherwise whitespace
         for (var y = maxY; y >= minY; y--) {
-            console.log("y", y);
             for (var x = minX; x <= maxX; x++) {
-                asciiArt += "+--------------";
+                asciiArt += "+––––––––––––––";
             }
             asciiArt += "+\n";
             for (var x = minX; x <= maxX; x++) {
-                asciiArt += "|     " + format((locActionFreqs[JSON.stringify([x, y])] || {})["u"]) + "     ";
+                asciiArt += "|     " + format((locActionData[JSON.stringify([x, y])] || {})["u"]) + "     ";
             }
             asciiArt += "|\n";
             for (var x = minX; x <= maxX; x++) {
-                asciiArt += "| " + format((locActionFreqs[JSON.stringify([x, y])] || {})["l"]) 
-                            + "    " + format((locActionFreqs[JSON.stringify([x, y])] || {})["r"]) + " ";
+                asciiArt += "| " + format((locActionData[JSON.stringify([x, y])] || {})["l"]) 
+                            + "    " + format((locActionData[JSON.stringify([x, y])] || {})["r"]) + " ";
             }
             asciiArt += "|\n";
             for (var x = minX; x <= maxX; x++) {
-                asciiArt += "|     " + format((locActionFreqs[JSON.stringify([x, y])] || {})["d"]) + "     ";
+                asciiArt += "|     " + format((locActionData[JSON.stringify([x, y])] || {})["d"]) + "     ";
             }
             asciiArt += "|\n";
         }
         for (var x = minX; x <= maxX; x++) {
-            asciiArt += "+--------------";
+            asciiArt += "+––––––––––––––";
         }
         asciiArt += "+\n";
-    console.log(asciiArt);
+        return asciiArt;
     },
 
     // TO BE MOVED TO src/utils/metalog.js:
