@@ -7,7 +7,7 @@ var env = getEnv(),
 //      debug: true
       // some env-specific option settings
     }, argv),
-    mdp = VerySimpleGW(argv.gw || "GW1", argv.gwparms),
+    mdp = VerySimpleGW(argv.gw || "GW2", argv.gwparms),
     world = mdp.world,
     transition = world.transition,
     expectedDelta = mdp.expectedDelta,
@@ -62,13 +62,22 @@ var gd = agent.getData, agentData = gd();
 var trajDist = Infer({ model() {
   return simulate(mdp.startState, aleph0).trajectory;
 }}).getDist();
-console.log("trajDist", trajDist);
+//console.log("trajDist", trajDist);
 var trajData = trajDist2TrajData(trajDist, agent);
-console.log("trajData", trajData);
+//console.log("trajData", trajData);
 var locActionData = webpplAgents.trajDist2LocActionData(trajDist, trajData);
 console.log("locActionData", locActionData);
-console.log(webpplAgents.locActionData2ASCII(locActionData.actionFreq));
-console.log(webpplAgents.locActionData2ASCII(locActionData.Q));
+
+console.log("\nminFeasibleQ:");
 console.log(stateActionFct2locActionData(agent.minFeasibleQ, agentData.stateActionPairs));
+console.log("\nmaxFeasibleQ:");
+console.log(stateActionFct2locActionData(agent.maxFeasibleQ, agentData.stateActionPairs));
+
+console.log("\nQ:");
+console.log(webpplAgents.locActionData2ASCII(locActionData.Q));
+
+console.log("\naction frequencies:");
+console.log(webpplAgents.locActionData2ASCII(locActionData.actionFreq, webpplAgents.onlyNonnegativeFormat));
+
 
 

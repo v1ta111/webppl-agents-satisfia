@@ -3,8 +3,20 @@
 var locActionData2ASCIIdefaultFormat = function (x) {
     // up to two decimal places if > 0.005, otherwise whitespace
     return x == "?" ? " ?? "
+        : x === undefined ? "    "
+        : /*x > 5e-3 ? */(Math.round(x * 100) / 100).toFixed(2)
+        //: "    "
+        ;
+};
+
+var onlyNonnegativeFormat = function (x) {
+    // up to two decimal places if > 0.005, otherwise whitespace
+    return x == "?" ? " ?? "
+        : x === undefined ? "    "
         : x > 5e-3 ? (Math.round(x * 100) / 100).toFixed(2)
-        : "    ";
+        : x < -5e-3 ? (Math.round(x * 100) / 100).toFixed(1)
+        : "    "
+        ;
 };
 
 module.exports = {
@@ -13,8 +25,12 @@ module.exports = {
 
     setFrom: (arg) => new Set(arg),
 
+    locActionData2ASCIIdefaultFormat,
+
+    onlyNonnegativeFormat,
+
     stateActionData2locActionData: function (stateActionData, stateActionPairs) {
-        var locActionData = {};
+        var locActionData = {}, timeLeft = {};
         for (var index in stateActionPairs) {
             var [state, action] = stateActionPairs[index]
             var loc = JSON.stringify(state.loc);
@@ -26,10 +42,14 @@ module.exports = {
             var val = stateActionData[index];
             if (!actionData[action]) {
                 actionData[action] = val;
-            } else {
-                console.log("WARNING: multiple entries for state", state, "action", action);
+                timeLeft[[loc, action]] = state.timeLeft;
+            } else if (state.timeLeft > timeLeft[[loc, action]]) {
+                actionData[action] = val;
+                timeLeft[[loc, action]] = state.timeLeft;
+            } else if (state.timeLeft == timeLeft[[loc, action]]) {
+                console.log("WARNING: multiple entries for state", state, "action", action, "values", val, actionData[action]);
                 actionData[action] = "?"; // TODO: how to handle this case?
-            }
+            } 
         }
         return locActionData;
     },

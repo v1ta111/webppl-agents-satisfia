@@ -21,11 +21,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
       lossCoeff4Entropy: 0, // weight of entropy in loss function, must be >= 0
       lossCoeff4KLdiv: 0, // weight of KL divergence in loss function, must be >= 0
       lossCoeff4FeasibilityPower: 0, // weight of power of squared feasibility interval width in loss function, must be >= 0
+      lossCoeff4Time: 0.1, // weight of time in loss function, must be >= 0
       lossCoeff4OtherLoss: 0, // weight of other loss components specified by otherLossIncrement, must be >= 0
       lossCoeff4Random: 1e-10, // weight of random tie breaker in loss function, must be >= 0
       allowNegativeCoeffs: false, // if true, allow negative loss coefficients
       onlyUseClosestActions: true, // if true, only use the two actions that are closest to the target aspiration in expectation
-      softmaxInvTemp: 1, // inverse temperature of softmax mixture of actions, must be > 0
+      softmaxInvTemp: 100, // inverse temperature of softmax mixture of actions, must be > 0
       rescalingDegree: 1, // degree (0...1) of aspiration rescaling. (expectation is only preserved if this is 1.0)
     }, params_), { options: extend({
       debug: false
@@ -66,6 +67,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         lossCoeff4Entropy = params.lossCoeff4Entropy,
         lossCoeff4KLdiv = params.lossCoeff4KLdiv,
         lossCoeff4FeasibilityPower = params.lossCoeff4FeasibilityPower,
+        lossCoeff4Time = params.lossCoeff4Time,
         lossCoeff4OtherLoss = params.lossCoeff4OtherLoss,
         lossCoeff4Random = params.lossCoeff4Random,
         allowNegativeCoeffs = params.allowNegativeCoeffs,
@@ -84,6 +86,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     assert.ok(allowNegativeCoeffs | lossCoeff4Entropy >= 0, "lossCoeff4entropy must be >= 0");
     assert.ok(allowNegativeCoeffs | lossCoeff4KLdiv >= 0, "lossCoeff4KLdiv must be >= 0");
     assert.ok(allowNegativeCoeffs | lossCoeff4FeasibilityPower >= 0, "lossCoeff4FeasibilityPower must be >= 0");
+    assert.ok(allowNegativeCoeffs | lossCoeff4Time >= 0, "lossCoeff4time must be >= 0");
     assert.ok(allowNegativeCoeffs | lossCoeff4OtherLoss >= 0, "lossCoeff4OtherLoss must be >= 0");
     assert.ok(allowNegativeCoeffs | lossCoeff4Random >= 0, "lossCoeff4random must be >= 0");
     assert.ok(softmaxInvTemp > 0, "softmaxInvTemp must be > 0");
@@ -789,7 +792,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // combined loss:
     // ! recursive function:
     var combinedLoss = dp.cache(function(s /*state*/, a /*action*/, al /*aleph*/, v, q, p /*actionProbability*/) { 
-      var q_ones = lossCoeff4DeltaVariation != 0 ? Q_ones(s, a, al) : undefined,
+      var q_ones = (lossCoeff4DeltaVariation != 0 || lossCoeff4Time != 0) ? Q_ones(s, a, al) : undefined,
           alI = asInterval(al);
       return (
         (lossCoeff4Cup != 0 ? lossCoeff4Cup * (
@@ -812,6 +815,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         + (lossCoeff4KLdiv != 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(s, p, a, al) : 0) 
         + (lossCoeff4Entropy != 0 ? lossCoeff4Entropy * behaviorEntropy_action(s, p, a, al) : 0)
         + (lossCoeff4FeasibilityPower != 0 ? lossCoeff4FeasibilityPower * squared(maxFeasibleQ(s, a) - minFeasibleQ(s, a)) : 0)
+        + (lossCoeff4Time != 0 ? lossCoeff4Time * q_ones : 0)
         + (otherLocalLoss && (lossCoeff4OtherLoss != 0) ? lossCoeff4otherLoss * otherLoss_action(s, a, al) : 0)
         + (lossCoeff4Random != 0 ? lossCoeff4Random * randomTieBreaker(s, a) : 0)
       );

@@ -46,10 +46,13 @@ var intersect = function(interval1, interval2) {
 var squared = function(x) { return x*x; },
     cubed = function(x) { return Math.pow(x, 3); };
 
-var tableToExpectedDeltaFct = function(table, feature) {
+var tableToExpectedDeltaFct = function(table, feature, timeOutValue) {
     return function(state, unused_action) {
-        var f = feature(state), stateFeatureName = f.name, inc = stateFeatureName ? table[stateFeatureName] : table[f['0']];
-        return inc;
+        var f = feature(state), 
+            stateFeatureName = f.name, 
+            Edel = state.timeLeft > 1 ? (stateFeatureName ? table[stateFeatureName] : table[f['0']]) 
+                 : timeOutValue === undefined ? -1e10 : timeOutValue;
+        return Edel;
     };
 };
 
