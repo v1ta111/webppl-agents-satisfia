@@ -1,3 +1,9 @@
+# webppl-agents-satisfia
+
+Extension of webppl-agents with [additional non-maximizing agent types](/src/agents/makeMDPAgentSatisfia.wppl)
+
+(original README.md:)
+
 # webppl-agents
 
 This package provides constructors for MDP and POMDP agents, for gridworld and bandit environments, and a function for visualizing gridworlds:
