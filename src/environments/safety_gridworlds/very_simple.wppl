@@ -1,4 +1,22 @@
-var VerySimpleGW = function(gw, parms) {
+var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
+  console.log("VerySimpleGW", gw, parms, time, timeOutDelta);
+
+  var makeGW = function(d) {
+    var mdp = makeGridWorldMDP({
+          grid: map(function (r) { return map(function (c) { return c == 'A' ? ' ' : c; }, r); }, d.grid),
+          start: d.start || find2D(d.grid, 'A'),
+          totalTime: d.totalTime || time
+        }),
+        world = mdp.world,
+        startState = mdp.startState,
+        f0 = world.feature, 
+        feature = function(s) {return extend(f0(s), {test: "TODO: what does this do?"})},
+        expectedDelta = tableToExpectedDeltaFct(d.expectedDeltaTable, feature, d.timeOutDelta || timeOutDelta),
+        uninformedPolicy = undefined,
+        refPolicy = UniformGridPolicy()
+        ;
+    return { world, expectedDelta, uninformedPolicy, refPolicy, startState, aleph0: d.aleph0 };
+  };
 
   if (gw == "GW1" || gw === undefined) {
     var G1 = { name : 'G1' },
@@ -18,7 +36,7 @@ var VerySimpleGW = function(gw, parms) {
           ' ': 0
         },
         aleph0: 2,
-        totalTime: 1
+        totalTime: time || 10
       });
     /*
     Desired solution: go North
@@ -45,7 +63,7 @@ var VerySimpleGW = function(gw, parms) {
           ' ': 0
         },
         aleph0: 2,
-        totalTime: 10
+        totalTime: time || 10
       });
     /*
     Desired: go to the G that gives 2. 
@@ -73,11 +91,64 @@ var VerySimpleGW = function(gw, parms) {
           ' ': 0
         },
         aleph0: 2,
-        totalTime: 10
+        totalTime: time || 10
       });
     /*
     Desired: go to the G that gives 2. 
     Undesired: flip a coin and go to either of the two other Gs.
+    */
+  } else if (gw == "GW4") {
+    var Ga = { name : 'Ga' },
+        Gb = { name : 'Gb' },
+        Gc = { name : 'Gc' },
+        Gd = { name : 'Gd' },
+        deltas = JSON.parse(parms || "[1, 3, 2, 0]");
+    return makeGW({
+        grid: [
+          ['#', '#', '#', '#', '#', '#'],
+          ['#', 'A', ' ', ' ', ' ', '#'],
+          ['#', Ga , Gb , Gc , Gd , '#'],
+          ['#', '#', '#', '#', '#', '#']
+        ],
+        expectedDeltaTable: {
+          'Ga': deltas[0],
+          'Gb': deltas[1],
+          'Gc': deltas[2],
+          'Gd': deltas[3],
+          ' ': 0
+        },
+        aleph0: 1.5,  // !
+        totalTime: time || 10
+      });
+    /*
+    Desired: flip a coin and go to one of the Gs that give 1 or 2
+    TODO: doesn't work yet with webppl --require webppl-dp --require . examples/runVerySimpleGW.wppl -- --onlyUseClosestActions 0 --gw GW4 --time 4, it gives huge cupLoss
+    */
+  } else if (gw == "GW6") {
+    var G1 = { name : 'G1' },
+        G2 = { name : 'G2' },
+        G4 = { name : 'G4' };
+    return makeGW({
+        grid: [
+          ['#', '#', '#', '#', '#'],
+          ['#', G1 , '#', G4 , '#'],
+          ['#', ' ', 'A', 'Δ', '#'],
+          ['#', G2 , '#', '#', '#'],
+          ['#', '#', '#', '#', '#']
+        ],
+        expectedDeltaTable: {
+          'G1': 1,
+          'G2': 2,
+          'G4': 4,
+          'Δ': -2,
+          ' ': 0
+        },
+        aleph0: 2,
+        totalTime: time || 10
+      });
+    /*
+    Desired: go to the G that gives 4. 
+    TODO: --onlyUseClosestActions 1 does not work yet
     */
   }
 };
@@ -86,21 +157,4 @@ var find2D = function(a, q) {
   var i = ([].concat.apply([], a)).indexOf(q),
       res = [Math.floor(i / a[0].length), a.length-1 - (i % a[0].length)];
   return res;
-};
-
-var makeGW = function(d) {
-  var mdp = makeGridWorldMDP({
-        grid: map(function (r) { return map(function (c) { return c == 'A' ? ' ' : c; }, r); }, d.grid),
-        start: d.start || find2D(d.grid, 'A'),
-        totalTime: d.totalTime
-      }),
-      world = mdp.world,
-      startState = mdp.startState,
-      f0 = world.feature, 
-      feature = function(s) {return extend(f0(s), {test: "TODO: what does this do?"})},
-      expectedDelta = tableToExpectedDeltaFct(d.expectedDeltaTable, feature),
-      uninformedPolicy = undefined,
-      refPolicy = UniformGridPolicy()
-      ;
-  return { world, expectedDelta, uninformedPolicy, refPolicy, startState, aleph0: d.aleph0 };
 };

@@ -2,10 +2,17 @@
 
 var locActionData2ASCIIdefaultFormat = function (x) {
     // up to two decimal places if > 0.005, otherwise whitespace
+    var y = Math.round(x * 100) / 100;
     return x == "?" ? " ?? "
         : x === undefined ? "    "
-        : /*x > 5e-3 ? */(Math.round(x * 100) / 100).toFixed(2)
-        //: "    "
+        : 5e-3 <= x && x < 10 ? y.toFixed(2)
+        : 10 <= x && x < 100 ? y.toFixed(1)
+        : 100 <= x && x < 10000 ? y
+        : 10000 <= x ? y.toExponential(0).replace('+','')
+        : -5e-3 >= x && x > -10 ? y.toFixed(1)
+        : -10 >= x && x > -1000 ? y
+        : -1000 >= x ? y.toExponential(0).replace('+','')
+        : " ~0 "
         ;
 };
 
@@ -46,7 +53,7 @@ module.exports = {
             } else if (state.timeLeft > timeLeft[[loc, action]]) {
                 actionData[action] = val;
                 timeLeft[[loc, action]] = state.timeLeft;
-            } else if (state.timeLeft == timeLeft[[loc, action]]) {
+            } else if (state.timeLeft == timeLeft[[loc, action]] && val != actionData[action]) {
                 console.log("WARNING: multiple entries for state", state, "action", action, "values", val, actionData[action]);
                 actionData[action] = "?"; // TODO: how to handle this case?
             } 
@@ -55,7 +62,7 @@ module.exports = {
     },
 
     trajDist2LocActionData: function (trajDist, trajData) {
-        var keys = Object.keys(trajDist), V = {}, Q = {}, actionFreq = {};
+        var keys = Object.keys(trajDist), V = {}, Q = {}, cupLoss = {}, actionFreq = {};
         for (var index in keys) {
             var trajString = keys[index], data = trajData[index],
                 traj = JSON.parse(trajString), val = trajDist[trajString], prob = val.prob;
@@ -65,12 +72,14 @@ module.exports = {
                 var freq = actionFreq[loc], q = Q[loc];
                 V[loc] = (V[loc] || 0) + additionalData.V * prob;
                 if (!Q[loc]) { Q[loc] = q = {}; }
+                if (!cupLoss[loc]) { cupLoss[loc] = c = {}; }
                 q[action] = (q[action] || 0) + additionalData.Q * prob; // FIXME
+                c[action] = (c[action] || 0) + additionalData.cupLoss * prob; // FIXME
                 if (!freq) { actionFreq[loc] = freq = {}; }
                 freq[action] = (freq[action] || 0) + prob;
             }
         }
-        return { V, Q, actionFreq };
+        return { V, Q, cupLoss, actionFreq };
     },
 
     locActionData2ASCII: function (
@@ -82,30 +91,34 @@ module.exports = {
             minX = Math.min(...xs)-1, maxX = Math.max(...xs)+1, 
             minY = Math.min(...ys)-1, maxY = Math.max(...ys)+1;
 //        console.log("xs", xs, "ys", ys, "minX", minX, "maxX", maxX, "minY", minY, "maxY", maxY);
-        var asciiArt = "";
+        var asciiArt = "   ";
         for (var y = maxY; y >= minY; y--) {
             for (var x = minX; x <= maxX; x++) {
                 asciiArt += "+––––––––––––––";
             }
-            asciiArt += "+\n";
+            asciiArt += "+\n   ";
             for (var x = minX; x <= maxX; x++) {
                 asciiArt += "|     " + format((locActionData[JSON.stringify([x, y])] || {})["u"]) + "     ";
             }
-            asciiArt += "|\n";
+            asciiArt += "|\n"+String(y).padStart(2,' ')+" ";
             for (var x = minX; x <= maxX; x++) {
                 asciiArt += "| " + format((locActionData[JSON.stringify([x, y])] || {})["l"]) 
                             + "    " + format((locActionData[JSON.stringify([x, y])] || {})["r"]) + " ";
             }
-            asciiArt += "|\n";
+            asciiArt += "|\n   ";
             for (var x = minX; x <= maxX; x++) {
                 asciiArt += "|     " + format((locActionData[JSON.stringify([x, y])] || {})["d"]) + "     ";
             }
-            asciiArt += "|\n";
+            asciiArt += "|\n   ";
         }
         for (var x = minX; x <= maxX; x++) {
             asciiArt += "+––––––––––––––";
         }
-        asciiArt += "+\n";
+        asciiArt += "+\n   ";
+        for (var x = minX; x <= maxX; x++) {
+            asciiArt += "       "+String(x).padStart(2,' ')+"      ";
+        }
+        asciiArt += "\n";
         return asciiArt;
     },
 

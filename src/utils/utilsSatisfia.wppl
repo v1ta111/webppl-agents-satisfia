@@ -51,7 +51,7 @@ var tableToExpectedDeltaFct = function(table, feature, timeOutValue) {
         var f = feature(state), 
             stateFeatureName = f.name, 
             Edel = state.timeLeft > 1 ? (stateFeatureName ? table[stateFeatureName] : table[f['0']]) 
-                 : timeOutValue === undefined ? -1e10 : timeOutValue;
+                 : timeOutValue === undefined ? -1e9 : timeOutValue;
         return Edel;
     };
 };
@@ -68,13 +68,13 @@ var stateActionFct2table = function(stateActionFct, stateActionPairs) {
     return map(function(stateActionPair) { return stateActionFct(stateActionPair[0], stateActionPair[1]); }, stateActionPairs);
 };
 
-var stateActionFct2locActionData = function(stateActionFct, stateActionPairs) {
+var stateActionFct2ASCII = function(stateActionFct, stateActionPairs) {
     var tbl = stateActionFct2table(stateActionFct, stateActionPairs);
     return webpplAgents.locActionData2ASCII(webpplAgents.stateActionData2locActionData(tbl, stateActionPairs));
 };
 
 var trajDist2TrajData = function(trajDist, agent) {
-    var keys = Object.keys(trajDist), V = agent.V, Q = agent.Q; 
+    var keys = Object.keys(trajDist), V = agent.V, Q = agent.Q, cupLoss = agent.cupLoss_action; 
     return map(function(key) { 
         var traj = JSON.parse(key);
         return map(function(stepData) {
@@ -82,7 +82,8 @@ var trajDist2TrajData = function(trajDist, agent) {
             return {
                 aleph,
                 V: V(state, aleph),
-                Q: Q(state, action, aleph)
+                Q: Q(state, action, aleph),
+                cupLoss: cupLoss(state, action, aleph)
             };
         }, traj);
     }, keys);

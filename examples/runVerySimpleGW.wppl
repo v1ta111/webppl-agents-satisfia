@@ -7,7 +7,7 @@ var env = getEnv(),
 //      debug: true
       // some env-specific option settings
     }, argv),
-    mdp = VerySimpleGW(argv.gw || "GW2", argv.gwparms),
+    mdp = VerySimpleGW(argv.gw || "GW2", argv.gwparms, argv.time, argv.timeOutDelta),
     world = mdp.world,
     transition = world.transition,
     expectedDelta = mdp.expectedDelta,
@@ -24,7 +24,8 @@ var env = getEnv(),
     V = agent.V, 
     V2 = agent.V2,
     entropy = agent.behaviorEntropy_state, 
-    KLdiv = agent.behaviorKLdiv_state;
+    KLdiv = agent.behaviorKLdiv_state,
+    cupLoss = agent.cupLoss_state;
 
 // Generate and draw a trajectory:
 var simulate = function(state, aleph, _t) {
@@ -54,7 +55,7 @@ var simulate = function(state, aleph, _t) {
 console.log("V", V(startState, aleph0));
 console.log("entropy", entropy(mdp.startState, aleph0));
 console.log("KLdiv", KLdiv(mdp.startState, aleph0));
-
+console.log("cupLoss", cupLoss(mdp.startState, aleph0));
 var gd = agent.getData, agentData = gd();
 
 // estimate distribution of trajectories:
@@ -62,22 +63,25 @@ var gd = agent.getData, agentData = gd();
 var trajDist = Infer({ model() {
   return simulate(mdp.startState, aleph0).trajectory;
 }}).getDist();
-//console.log("trajDist", trajDist);
+console.log("trajDist", trajDist);
 var trajData = trajDist2TrajData(trajDist, agent);
 //console.log("trajData", trajData);
 var locActionData = webpplAgents.trajDist2LocActionData(trajDist, trajData);
 console.log("locActionData", locActionData);
 
 console.log("\nminFeasibleQ:");
-console.log(stateActionFct2locActionData(agent.minFeasibleQ, agentData.stateActionPairs));
+console.log(stateActionFct2ASCII(agent.minFeasibleQ, agentData.stateActionPairs));
 console.log("\nmaxFeasibleQ:");
-console.log(stateActionFct2locActionData(agent.maxFeasibleQ, agentData.stateActionPairs));
+console.log(stateActionFct2ASCII(agent.maxFeasibleQ, agentData.stateActionPairs));
 
 console.log("\nQ:");
 console.log(webpplAgents.locActionData2ASCII(locActionData.Q));
 
+console.log("\ncupLoss:");
+console.log(webpplAgents.locActionData2ASCII(locActionData.cupLoss));
+
 console.log("\naction frequencies:");
-console.log(webpplAgents.locActionData2ASCII(locActionData.actionFreq, webpplAgents.onlyNonnegativeFormat));
+console.log(webpplAgents.locActionData2ASCII(locActionData.actionFreq));
 
 
 

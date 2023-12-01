@@ -1,6 +1,16 @@
 // SatisfIA aspiration-based non-maximizing agent 
 // with aspiration rescaling and several adjustable safety criteria.
 
+/*
+
+TODO:
+- implement other loss components
+  - misstepping-related loss 
+  - deal better with finite time horizon 
+  - assess complexity of updating the policy when world model is updated
+  - implement a learning version of this that has no access to a world model
+*/
+
 var makeMDPAgentSatisfia = function(params_, world) {
 
     // uncomment later once we want to do anything with the metalog distribution:
@@ -18,7 +28,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       lossCoeff4DeltaVariation: 0, // weight of variation of Delta in loss function, must be >= 0
       lossCoeff4LRA: 0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
       lossCoeff4MP: 0, // weight of messing potential in loss function, must be >= 0
-      lossCoeff4Entropy: 0, // weight of entropy in loss function, must be >= 0
+      lossCoeff4Entropy: 1, // weight of entropy in loss function, must be >= 0
       lossCoeff4KLdiv: 0, // weight of KL divergence in loss function, must be >= 0
       lossCoeff4FeasibilityPower: 0, // weight of power of squared feasibility interval width in loss function, must be >= 0
       lossCoeff4Time: 0.1, // weight of time in loss function, must be >= 0
@@ -77,18 +87,18 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var options = params.options, 
         debug = options.debug;
   
-    assert.ok(allowNegativeCoeffs | lossCoeff4Cup >= 0, "lossCoeff4Cup must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4Variance >= 0, "lossCoeff4variance must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4Fourth >= 0, "lossCoeff4Fourth must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4LRA >= 0, "lossCoeff4LRA must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4Entropy >= 0, "lossCoeff4entropy must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4KLdiv >= 0, "lossCoeff4KLdiv must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4FeasibilityPower >= 0, "lossCoeff4FeasibilityPower must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4Time >= 0, "lossCoeff4time must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4OtherLoss >= 0, "lossCoeff4OtherLoss must be >= 0");
-    assert.ok(allowNegativeCoeffs | lossCoeff4Random >= 0, "lossCoeff4random must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Cup >= 0, "lossCoeff4Cup must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Variance >= 0, "lossCoeff4variance must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Fourth >= 0, "lossCoeff4Fourth must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4LRA >= 0, "lossCoeff4LRA must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Entropy >= 0, "lossCoeff4entropy must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4KLdiv >= 0, "lossCoeff4KLdiv must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4FeasibilityPower >= 0, "lossCoeff4FeasibilityPower must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Time >= 0, "lossCoeff4time must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4OtherLoss >= 0, "lossCoeff4OtherLoss must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Random >= 0, "lossCoeff4random must be >= 0");
     assert.ok(softmaxInvTemp > 0, "softmaxInvTemp must be > 0");
     assert.ok(0 <= rescalingDegree <= 1, "rescalingDegree must be in 0...1");
   
@@ -763,6 +773,24 @@ var makeMDPAgentSatisfia = function(params_, world) {
       return Infer({ model() {return transition(state, action); }});
     });
   
+    // recursive function:
+    var cupLoss_state = dp.cache(function(state, aleph){
+      var localPolicy = localPolicy(state, aleph); // ! recursion here !
+      return expectation(Infer({ model() {
+        return cupLoss_action(state, sample(localPolicy), aleph);
+      }
+      }));
+    });
+    var cupLoss_action = dp.cache(function(state, action, aleph){
+      // loss based on a "cup" shaped potential centered at the mid-point of the aspiration interval
+      // that is almost completely flat in the middle half of the interval 
+      // (https://www.wolframalpha.com/input?i=plot+%28x-.5%29%5E6+from+0+to+1):
+      var alI = asInterval(aleph),
+          res = Q6v(state, action, aleph, (alI[0] + alI[1]) / 2);
+      if (debug) console.log("  cupLoss", pretty(state), action, aleph, res);
+      return res;
+    });
+
     // other loss:
     // recursive function:
     var otherLoss_state = dp.cache(function(state, aleph) {
@@ -795,18 +823,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
       var q_ones = (lossCoeff4DeltaVariation != 0 || lossCoeff4Time != 0) ? Q_ones(s, a, al) : undefined,
           alI = asInterval(al);
       return (
-        (lossCoeff4Cup != 0 ? lossCoeff4Cup * (
-            // loss based on a "cup" shaped potential centered at the mid-point of the aspiration interval
-            // that is almost completely flat in the middle half of the interval 
-            // (https://www.wolframalpha.com/input?i=plot+%28x-.5%29%5E6+from+0+to+1):
-            Q6v(s, a, al, (alI[0] + alI[1]) / 2)
-          ) : 0) // ! recursion here !
-        + (lossCoeff4Variance != 0 ? lossCoeff4Variance * (
-            Q2v(s, a, al, v)
-          ) : 0) // ! recursion here !
-        + (lossCoeff4Fourth != 0 ? lossCoeff4Fourth * (
-            Q4v(s, a, al, v)
-          ) : 0) // ! recursion here ! 
+        (lossCoeff4Cup != 0 ? lossCoeff4Cup * cupLoss_action(s, a, al) : 0) // ! recursion here !
+        + (lossCoeff4Variance != 0 ? lossCoeff4Variance * Q2v(s, a, al, v) : 0) // ! recursion here !
+        + (lossCoeff4Fourth != 0 ? lossCoeff4Fourth * Q4v(s, a, al, v) : 0) // ! recursion here ! 
         + (lossCoeff4DeltaVariation != 0 ? lossCoeff4DeltaVariation * (
             Q_DeltaSquare(s, a, al) / q_ones -  Q2(s, a, al) / squared(q_ones)
           ) : 0) // ! recursion here !
@@ -842,7 +861,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
       Q, V, Q2, V2, Q_DeltaSquare, V_DeltaSquare, Q_ones, V_ones,
       messingPotential_state, messingPotential_action,
       behaviorEntropy_state, behaviorEntropy_action, 
-      behaviorKLdiv_state, behaviorKLdiv_action, otherLoss_state, otherLoss_action, 
+      behaviorKLdiv_state, behaviorKLdiv_action, 
+      cupLoss_state, cupLoss_action,
+      otherLoss_state, otherLoss_action, 
       combinedLoss,
       getData
     };
