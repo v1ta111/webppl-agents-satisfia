@@ -3,12 +3,8 @@
 
 /*
 
-TODO:
-- implement other loss components
-  - misstepping-related loss 
-  - deal better with finite time horizon 
-  - assess complexity of updating the policy when world model is updated
-  - implement a learning version of this that has no access to a world model
+TODO: see https://github.com/orgs/pik-gane/projects/2
+
 */
 
 var makeMDPAgentSatisfia = function(params_, world) {
@@ -221,8 +217,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // or of the LRA-based problem (if maxLambda<1):
     // ! recursive function:
     var maxFeasibleQ = dp.cache(function(state, action){
-      // TODO: register (state, action) in global store
-      stateActionPairsSet.add([state,action]);
+      stateActionPairsSet.add([state,action]); // register (state, action) in global store (could be anywhere, but here is just as fine as anywhere else)
       var Edel = expectedDelta(state, action),
           q = state.terminateAfterAction 
               ? Edel 
@@ -768,7 +763,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           }}));
       return MP;
     });
-    // TODO: later the following should actually be provided by the env/world:
+    // Remark: later the following should actually be provided by the env/world:
     var transitionDistribution = dp.cache(function(state, action) {
       return Infer({ model() {return transition(state, action); }});
     });
@@ -839,19 +834,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
         + (lossCoeff4Random != 0 ? lossCoeff4Random * randomTieBreaker(s, a) : 0)
       );
     });
-    // TODO: add further criteria, like:
-    // - estd. probability of actual total being in aspiration interval
-    // - using same action as last step
-    // - using "simple" policies (in addition to being rather deterministic)
 
     var getData = function() {
       var stateActionPairs = Array.from(stateActionPairsSet),
           states = Array.from(webpplAgents.setFrom(map(function(pair) { return pair[0]; }, stateActionPairs))),
           locs = map(function(state) { return state.loc; }, states);
-      // TODO: locs etc.
-      return { states, stateActionPairs, 
-        
-        locs };
+      return { states, stateActionPairs, locs };
     };
 
     return { 
