@@ -1,3 +1,5 @@
+// TODO: prevent agent from turning around
+
 var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
   console.log("VerySimpleGW", gw, parms, time, timeOutDelta);
 
@@ -8,14 +10,28 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
           totalTime: d.totalTime || time
         }),
         world = mdp.world,
+        stateToActions0 = world.stateToActions,
         startState = mdp.startState,
         f0 = world.feature, 
         feature = function(s) {return extend(f0(s), {test: "TODO: what does this do?"})},
         expectedDelta = tableToExpectedDeltaFct(d.expectedDeltaTable, feature, d.timeOutDelta || timeOutDelta),
         uninformedPolicy = undefined,
-        referencePolicy = UniformGridPolicy()
-        ;
-    return { world, expectedDelta, uninformedPolicy, referencePolicy, startState, aleph0: d.aleph0 };
+        referencePolicy = UniformGridPolicy(),
+        stateToActions = function(s) {
+          var actions = stateToActions0(s);
+          if (!s.previousLoc) { return actions; }
+          var lx = s.loc[0], ly = s.loc[1], px = s.previousLoc[0], py = s.previousLoc[1],
+              back = (lx == px && ly == py+1) ? "d" 
+                    : (lx == px && ly == py-1) ? "u" 
+                    : (lx == px+1 && ly == py) ? "l" 
+                    : (lx == px-1 && ly == py) ? "r"
+                    : undefined,
+              backIndex = actions.indexOf(back);
+          return actions.slice(0, backIndex).concat(actions.slice(backIndex+1));
+        },
+        our_world = { transition: world.transition, stateToActions, feature };
+
+    return { world: our_world, expectedDelta, uninformedPolicy, referencePolicy, startState, aleph0: d.aleph0 };
   };
 
   if (gw == "GW1" || gw === undefined) {
@@ -126,19 +142,19 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
     */
   } else if (gw == "GW6") {
     var G1 = { name : 'G1' },
-        G2 = { name : 'G2' },
+        G3 = { name : 'G3' },
         G4 = { name : 'G4' };
     return makeGW({
         grid: [
           ['#', '#', '#', '#', '#'],
           ['#', G1 , '#', G4 , '#'],
           ['#', ' ', 'A', 'Δ', '#'],
-          ['#', G2 , '#', '#', '#'],
+          ['#', G3 , '#', '#', '#'],
           ['#', '#', '#', '#', '#']
         ],
         expectedDeltaTable: {
           'G1': 1,
-          'G2': 2,
+          'G3': 3,
           'G4': 4,
           'Δ': -2,
           ' ': 0
