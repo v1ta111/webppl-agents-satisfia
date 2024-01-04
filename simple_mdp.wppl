@@ -1,4 +1,4 @@
-// run via  webppl --require webppl-dp --require webppl-call-async --require packaged_3rdparty_modules/ceres --require . simple_mdp.wppl
+// run via  webppl --require webppl-dp --require . simple_mdp.wppl
 
 // find out about environment:
 var env = getEnv();

@@ -1,6 +1,33 @@
-var pretty = function (x) { JSON.stringify(x, null, 0); };
+// pretty-printing:
+
+var prettyState = function (x) { return "(" + x.loc[0] + "," + x.loc[1] + ")-" + x.timeLeft; };
+
+
+// math:
+
+var squared = function(x) { return x*x; },
+    cubed = function(x) { return Math.pow(x, 3); };
+
+
+// functions for intervals:
 
 var asInterval = function(x) { return _.isArray(x) ? x : [x,x]; };
+
+var intersect = function(interval1, interval2) {
+    // do the two intervals intersect in at least one point?
+    return (interval1[0] <= interval2[1]) && (interval2[0] <= interval1[1]);
+}
+
+var isSubsetOf = function(interval1, interval2) {
+    // is interval1 a subset of interval2?
+    return (interval2[0] <= interval1[0]) && (interval2[1] >= interval1[1]);
+}
+
+var midpoint = function(interval) {
+    return (interval[0] + interval[1]) / 2;
+}
+
+// interpolation, relative position, clipping:
 
 var interpolate = function(x, lam, y) {
     // this is denoted  x : lam : y  in formulas
@@ -38,20 +65,15 @@ var clip = function(x, z, y) {
     }
 }
 
-var intersect = function(interval1, interval2) {
-    // do the two intervals intersect in at least one point?
-    return (interval1[0] <= interval2[1]) && (interval2[0] <= interval1[1]);
-}
 
-var squared = function(x) { return x*x; },
-    cubed = function(x) { return Math.pow(x, 3); };
+// other functions:
 
-var tableToExpectedDeltaFct = function(table, feature, timeOutValue) {
+var tableToExpectedDeltaFct = function(table, feature, timeOutDelta) {
     return function(state, unused_action) {
         var f = feature(state), 
             stateFeatureName = f.name, 
             Edel = state.timeLeft > 1 ? (stateFeatureName ? table[stateFeatureName] : table[f['0']]) 
-                 : timeOutValue === undefined ? -1e9 : timeOutValue;
+                 : (timeOutDelta || -1000);
         return Edel;
     };
 };
@@ -74,19 +96,19 @@ var stateActionFct2ASCII = function(stateActionFct, stateActionPairs) {
 };
 
 var trajDist2TrajData = function(trajDist, agent) {
-    var keys = Object.keys(trajDist), V = agent.V, Q = agent.Q, cupLoss = agent.cupLoss_action; 
-    return map(function(key) { 
+    var keys = Object.keys(trajDist), V = agent.V, Q = agent.Q; 
+    var trajData = map(function(key) { 
         var traj = JSON.parse(key);
         return map(function(stepData) {
-            var state = stepData.state, aleph=stepData.aleph, action = stepData.action, Edel = stepData.Edel;
+            var state = stepData.state, aleph4state=stepData.aleph4state, action = stepData.action, aleph4action = stepData.aleph4action, Edel = stepData.Edel;
             return {
-                aleph,
-                V: V(state, aleph),
-                Q: Q(state, action, aleph),
-                cupLoss: cupLoss(state, action, aleph)
+                aleph: aleph4state,
+                V: V(state, aleph4state),
+                Q: Q(state, action, aleph4action)
             };
         }, traj);
     }, keys);
+    return trajData;
 };
 
 

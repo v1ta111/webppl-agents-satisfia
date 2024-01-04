@@ -13,9 +13,9 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
         feature = function(s) {return extend(f0(s), {test: "TODO: what does this do?"})},
         expectedDelta = tableToExpectedDeltaFct(d.expectedDeltaTable, feature, d.timeOutDelta || timeOutDelta),
         uninformedPolicy = undefined,
-        refPolicy = UniformGridPolicy()
+        referencePolicy = UniformGridPolicy()
         ;
-    return { world, expectedDelta, uninformedPolicy, refPolicy, startState, aleph0: d.aleph0 };
+    return { world, expectedDelta, uninformedPolicy, referencePolicy, startState, aleph0: d.aleph0 };
   };
 
   if (gw == "GW1" || gw === undefined) {
@@ -35,7 +35,7 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
           'G3': 3,
           ' ': 0
         },
-        aleph0: 2,
+        aleph0: [1.7,2.3],
         totalTime: time || 10
       });
     /*
@@ -122,7 +122,7 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
       });
     /*
     Desired: flip a coin and go to one of the Gs that give 1 or 2
-    TODO: doesn't work yet with webppl --require webppl-dp --require . examples/runVerySimpleGW.wppl -- --onlyUseClosestActions 0 --gw GW4 --time 4, it gives huge cupLoss
+    TODO: doesn't work yet with webppl --require webppl-dp --require . examples/runVerySimpleGW.wppl -- --gw GW4 --time 4, it gives huge cupLoss
     */
   } else if (gw == "GW6") {
     var G1 = { name : 'G1' },
@@ -148,7 +148,6 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
       });
     /*
     Desired: go to the G that gives 4. 
-    TODO: --onlyUseClosestActions 1 does not work yet
     */
   }
 };

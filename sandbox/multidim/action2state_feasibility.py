@@ -2,6 +2,7 @@
 Python functions for approximating the feasibility region of a state from the feasibility regions of the actions when the criteria-space has several dimensions (but is still low-dimensional).
 There is an optimal version that uses cvxpy to solve a convex optimization problem, and a fast version that uses a greedy algorithm.
 The fast version is about 30 times faster and reaches an optimality of roughly 90% on average and roughly 50% in the worst case, measured in terms of the volume of the found region.
+In higher dimensions, both speedup and optimality of the fast solution decrease.
 '''
 
 from itertools import product
@@ -139,8 +140,8 @@ import matplotlib.pyplot as plt
 
 ## parameters
 
-d = 5  # 3  # dimension = no. of criteria i  (larger is more difficult to solve)
-k = 6  # 5  # no. of actions a  (smaller is more difficult to approximate)
+d = 4  # 2  # dimension = no. of criteria i  (larger is more difficult to solve, up to 4 seems to work fine)
+k = 5  # 5  # no. of actions a  (smaller is more difficult to approximate)
 
 nits = 100
 

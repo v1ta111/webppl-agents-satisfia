@@ -69,12 +69,13 @@ module.exports = {
             for (var t in traj) {
                 var stepData = traj[t], additionalData = data[t],
                     state = stepData.state, action = stepData.action, loc = JSON.stringify(state.loc);
+//                char[loc] = state.name[0];
                 var freq = actionFreq[loc], q = Q[loc];
-                V[loc] = (V[loc] || 0) + additionalData.V * prob;
+                V[loc] = Math.max(V[loc] || -1e10, additionalData.V);
                 if (!Q[loc]) { Q[loc] = q = {}; }
                 if (!cupLoss[loc]) { cupLoss[loc] = c = {}; }
-                q[action] = (q[action] || 0) + additionalData.Q * prob; // FIXME
-                c[action] = (c[action] || 0) + additionalData.cupLoss * prob; // FIXME
+                q[action] = Math.max(q[action] || -1e10, additionalData.Q);
+                c[action] = Math.max(c[action] || -1e10, additionalData.cupLoss);
                 if (!freq) { actionFreq[loc] = freq = {}; }
                 freq[action] = (freq[action] || 0) + prob;
             }

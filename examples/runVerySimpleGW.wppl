@@ -1,3 +1,5 @@
+// run via  webppl --require webppl-dp --require . examples/runVerySimpleGW.wppl
+
 var env = getEnv(),
     argv = env.argv,
     params = extend({
@@ -12,11 +14,11 @@ var env = getEnv(),
     transition = world.transition,
     expectedDelta = mdp.expectedDelta,
     uninformedPolicy = mdp.uninformedPolicy,
-    refPolicy = mdp.refPolicy,
+    referencePolicy = mdp.referencePolicy,
     startState = mdp.startState,
     aleph0 = mdp.aleph0,
     agent = makeMDPAgentSatisfia(extend(params, {
-      expectedDelta, uninformedPolicy, refPolicy, aleph0, options
+      expectedDelta, uninformedPolicy, referencePolicy, aleph0, options
     }), world),
     localPolicy = agent.localPolicy, 
     propagateAspiration = agent.propagateAspiration,
@@ -29,12 +31,14 @@ var env = getEnv(),
 
 // Generate and draw a trajectory:
 var simulate = function(state, aleph, _t) {
-  var t = _t ? _t : 0;
-  if (options.debug) console.log("simulate", pretty(state), aleph, t);
-  var localPolicy = localPolicy(state, aleph),
-      action = sample(localPolicy),
+  var t = _t ? _t : 0,
+      aleph4state = asInterval(aleph);
+  if (options.debug) console.log("simulate", prettyState(state), aleph4state, t);
+  var localPolicy = localPolicy(state, aleph4state),
+      actionAndAleph = sample(localPolicy),
+      action = actionAndAleph[0], aleph4action = actionAndAleph[1],
       Edel = expectedDelta(state, action);
-  var stepData = {state, aleph, action, Edel};
+  var stepData = {state, aleph4state, action, aleph4action, Edel};
   if (state.terminateAfterAction) {
     return { 
       trajectory: [stepData], // sequence of [state, action] pairs
@@ -42,8 +46,8 @@ var simulate = function(state, aleph, _t) {
     };
   } else {
     var nextState = transition(state, action),
-        nextAleph = propagateAspiration(state, aleph, action, Edel, nextState),
-        nextOut = simulate(nextState, nextAleph, t+1);
+        nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState),
+        nextOut = simulate(nextState, nextAleph4state, t+1);
     return { 
       trajectory: [stepData].concat(nextOut.trajectory), 
       conditionalExpectedIndicator: Edel + nextOut.conditionalExpectedIndicator
@@ -51,6 +55,7 @@ var simulate = function(state, aleph, _t) {
   }
 };
 
+console.log("aleph0", asInterval(aleph0));
 // verify meeting of expectations:
 console.log("V", V(startState, aleph0));
 console.log("entropy", entropy(mdp.startState, aleph0));
@@ -63,9 +68,12 @@ var gd = agent.getData, agentData = gd();
 var trajDist = Infer({ model() {
   return simulate(mdp.startState, aleph0).trajectory;
 }}).getDist();
-console.log("trajDist", trajDist);
+//console.log("trajDist", trajDist);
+
 var trajData = trajDist2TrajData(trajDist, agent);
+
 //console.log("trajData", trajData);
+
 var locActionData = webpplAgents.trajDist2LocActionData(trajDist, trajData);
 console.log("locActionData", locActionData);
 
@@ -76,9 +84,6 @@ console.log(stateActionFct2ASCII(agent.maxFeasibleQ, agentData.stateActionPairs)
 
 console.log("\nQ:");
 console.log(webpplAgents.locActionData2ASCII(locActionData.Q));
-
-console.log("\ncupLoss:");
-console.log(webpplAgents.locActionData2ASCII(locActionData.cupLoss));
 
 console.log("\naction frequencies:");
 console.log(webpplAgents.locActionData2ASCII(locActionData.actionFreq));

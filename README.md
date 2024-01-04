@@ -56,7 +56,7 @@ Rather than maximizing the return, this agent is given an initial aspiration poi
 To achieve this, the agent propagates the initial aspiration from step to step, taking into account the reward (here called `delta`) it gets and the possible total that is still achievable from the current state. It does so in such a way that the total equals the initial aspiration in expectation, using what we call "aspiration rescaling". 
 
 Since there are in general many possible policies that fulfil the constraint regarding the expected total, the agent will use a number of additional criteria to determine its actions.
-In each timestep, it will either use a deterministic action, or mix between two actions selected from those Q-values are closest to the remaining aspiration level from above and below (if `onlyUseClosestActions == true`), or mix between all actions (if `onlyUseClosestActions == false`) in a softmax-like fashion. For this selection or weighing it uses a loss function mixed from  the following terms using adjustable loss coefficients:
+In each timestep, it will use a mix of actions that can satisfy the aspiration in expectation, selected on the basis of a loss function mixed from, amongst others, the following terms using adjustable loss coefficients:
 - variance of resulting total
 - squared deviation of the local relative aspiration (the relative position of an action's Q-value in the feasible interval) of each step from 0.5
 - "messing potential" (maximal trajectory entropy that one may produce from the successor state when taking a certain action)
