@@ -56,11 +56,15 @@ var simulate = function(state, aleph, _t) {
 };
 
 console.log("aleph0", asInterval(aleph0));
+
+var t0 =  webpplAgents.time();
 // verify meeting of expectations:
 console.log("V", V(startState, aleph0));
+console.log("TIME:", webpplAgents.time() - t0, "ms");
 console.log("entropy", entropy(mdp.startState, aleph0));
 console.log("KLdiv", KLdiv(mdp.startState, aleph0));
 console.log("cupLoss", cupLoss(mdp.startState, aleph0));
+
 var gd = agent.getData, agentData = gd();
 
 // estimate distribution of trajectories:
@@ -68,6 +72,7 @@ var gd = agent.getData, agentData = gd();
 var trajDist = Infer({ model() {
   return simulate(mdp.startState, aleph0).trajectory;
 }}).getDist();
+
 //console.log("trajDist", trajDist);
 
 var trajData = trajDist2TrajData(trajDist, agent);

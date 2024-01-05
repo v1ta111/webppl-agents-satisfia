@@ -32,6 +32,12 @@ module.exports = {
 
     setFrom: (arg) => new Set(arg),
 
+    min: (arr) => Math.min.apply(null, arr),
+
+    max: (arr) => Math.max.apply(null, arr),
+
+    time: () => new Date().getTime(),
+
     locActionData2ASCIIdefaultFormat,
 
     onlyNonnegativeFormat,

@@ -54,12 +54,14 @@ Notes on how to port this WebPPL code to Python:
  * - aleph is an aspiration interval for a state or state-action
  */
 
+var _W = webpplAgents;
+
 var makeMDPAgentSatisfia = function(params_, world) {
 
     // uncomment later once we want to do anything with the metalog distribution:
     // var metalog = getMetalog(); // needed to enable metalog distribution used in loss function
     
-    var stateActionPairsSet = webpplAgents.emptySet(); // to be able to later loop over all state-action pairs visited
+    var stateActionPairsSet = _W.emptySet(); // to be able to later loop over all state-action pairs visited
 
     // extend default parameters and options by supplied ones:
     var params = extend(extend({
@@ -205,10 +207,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // ! recursive function:
     var maxFeasibleV = dp.cache(function(state){
       var actions = stateToActions(state),
-          Qstate = function(a) { return maxFeasibleQ(state, a); },  // ! recursion here !
+          qs = map(function(a) { return maxFeasibleQ(state, a); }, actions),  // ! recursion here !
           v = maxLambda == 1 
-              ? maxWith(Qstate, actions)[1] 
-              : interpolate(minWith(Qstate, actions)[1], maxLambda, maxWith(Qstate, actions)[1]);
+              ? _W.max(qs) 
+              : interpolate(_W.min(qs), maxLambda, _W.max(qs));
       if (debug) console.log("   maxFeasibleV", prettyState(state), v);
       return v;
     });
@@ -228,12 +230,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
     });
     // ! recursive function:
     var minFeasibleV = dp.cache(function(state){
-      var actions = stateToActions(state),
-          Qstate = function(action) { return minFeasibleQ(state, action); },  // ! recursion here !
+      var actions = stateToActions(state);
+      var qs = map(function(action) { return minFeasibleQ(state, action); }, actions),  // ! recursion here !
           v = minLambda == 0 
-              ? minWith(Qstate, actions)[1] 
-              : interpolate(minWith(Qstate, actions)[1], minLambda, maxWith(Qstate, actions)[1]);
-      if (debug) console.log("   minFeasibleV", prettyState(state), v);
+              ? _W.min(qs)
+              : interpolate(_W.min(qs), minLambda, _W.max(qs));
+      if (debug) console.log("   minFeasibleV", prettyState(state), qs, v);
       return v;
     });
 
@@ -400,7 +402,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
                 mid2 = midpoint(estAleph2),
                 p = relativePosition(mid1, midTarget, mid2);
 
-            // Now we find the largest relative size of aleph1 and aleph2 so that their mixture is still contained in aleph4state:
+            // Now we find the largest relative size of aleph1 and aleph2 
+            // so that their mixture is still contained in aleph4state:
             // we want aleph1Lo:p:aleph2Lo >= alephLo and aleph1Hi:p:aleph2Hi <= alephHi
             // where aleph1Lo = mid1 - x * w1, aleph1Hi = mid1 + x * w1, 
             //       aleph2Lo = mid2 - x * w2, aleph2Hi = mid2 + x * w2,
@@ -498,7 +501,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
       }});
 
       var support = locPol.support(),
-          ps = map(function(item) { return Math.max(1e-100, Math.exp(locPol.score(item))); }, support);
+          ps = map(function(item) { 
+                    return Math.max(1e-100, Math.exp(locPol.score(item)));  // 1e-100 prevents normalization problems
+                  }, support);
 
       return [support, ps];
 
@@ -560,7 +565,6 @@ var makeMDPAgentSatisfia = function(params_, world) {
       if (debug) console.log("  Q", prettyState(state), action, aleph4action, q);
       return q;
     });
-    // TODO: fix the Infinity error for GW6, webppl --require webppl-dp --require webppl-json --require . restaurant_choice.wppl -- --aleph0 2  --maxLambda 1.0 --minLambda 0.3 --debug 1
     // ! recursive function:
     var V = dp.cache(function(state, aleph4state){
       if (debug) console.log("  V", prettyState(state), aleph4state);
@@ -581,25 +585,33 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var expectedDeltaCubed = dp.cache(function(state, action){
       var Edel = expectedDelta(state, action),
           varDel = varianceOfDelta(state, action);
-      return Math.pow(varDel, 1.5)*skewnessOfDelta(state, action) + 3*Edel*varDel + Math.pow(Edel, 3);
+      return Math.pow(varDel, 1.5)*skewnessOfDelta(state, action) 
+             + 3*Edel*varDel 
+             + Math.pow(Edel, 3);
     });
     var expectedDeltaFourth = dp.cache(function(s, a){
       var Edel = expectedDelta(s, a);
       return squared(varianceOfDelta(s, a)) * (3 + excessKurtosisOfDelta(s, a))
-             + 4*expectedDeltaCubed(s, a)*Edel - 6*expectedDeltaSquared(s, a)*squared(Edel) + 3*Math.pow(Edel, 4);
+             + 4*expectedDeltaCubed(s, a)*Edel 
+             - 6*expectedDeltaSquared(s, a)*squared(Edel) 
+             + 3*Math.pow(Edel, 4);
     });
     var expectedDeltaFifth= dp.cache(function(s, a){
       var Edel = expectedDelta(s, a);
       return fifthMomentOfDelta(s, a)
-             + 5*expectedDeltaFourth(s, a)*Edel - 10*expectedDeltaCubed(s, a)*squared(Edel) 
-             + 10*expectedDeltaSquared(s, a)*cubed(Edel) - 4*Math.pow(Edel, 5);
+             + 5*expectedDeltaFourth(s, a)*Edel 
+             - 10*expectedDeltaCubed(s, a)*squared(Edel) 
+             + 10*expectedDeltaSquared(s, a)*cubed(Edel) 
+             - 4*Math.pow(Edel, 5);
     });
     var expectedDeltaSixth = dp.cache(function(s, a){
       var Edel = expectedDelta(s, a);
       return sixthMomentOfDelta(s, a)
-             + 6*expectedDeltaFifth(s, a)*Edel - 15*expectedDeltaFourth(s, a)*squared(Edel) 
+             + 6*expectedDeltaFifth(s, a)*Edel 
+             - 15*expectedDeltaFourth(s, a)*squared(Edel) 
              + 20*expectedDeltaCubed(s, a)*cubed(Edel) 
-             - 15*expectedDeltaSquared(s, a)*Math.pow(Edel, 4) + 5*Math.pow(Edel, 6);
+             - 15*expectedDeltaSquared(s, a)*Math.pow(Edel, 4) 
+             + 5*Math.pow(Edel, 6);
     });
   
     // Expected squared total, for computing the variance of total:
@@ -614,7 +626,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
           var nextState = transition(state, action),
               nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
           // TODO: verify formula:
-          return Edel2 + 2*Edel*V(nextState, nextAleph4state) + V2(nextState, nextAleph4state); // ! recursion here !
+          return Edel2 
+                 + 2*Edel*V(nextState, nextAleph4state) 
+                 + V2(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
       if (debug) console.log("  Q2", prettyState(state), action, aleph4action, q2);
@@ -644,8 +658,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
           var nextState = transition(state, action),
               nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
           // TODO: verify formula:
-          return Edel3 + 3*Edel2*V(nextState, nextAleph4state) 
-                 + 3*Edel*V2(nextState, nextAleph4state) + V3(nextState, nextAleph4state); // ! recursion here !
+          return Edel3 
+                 + 3*Edel2*V(nextState, nextAleph4state) 
+                 + 3*Edel*V2(nextState, nextAleph4state) 
+                 + V3(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
       if (debug) console.log("  Q3", prettyState(state), action, aleph4action, q3);
@@ -676,9 +692,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
           var nextState = transition(state, action),
               nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
           // TODO: verify formula:
-          return Edel4 + 4*Edel3*V(nextState, nextAleph4state) 
+          return Edel4 
+                 + 4*Edel3*V(nextState, nextAleph4state) 
                  + 6*Edel2*V2(nextState, nextAleph4state) 
-                 + 4*Edel*V3(nextState, nextAleph4state) + V4(nextState, nextAleph4state); // ! recursion here !
+                 + 4*Edel*V3(nextState, nextAleph4state) 
+                 + V4(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
       if (debug) console.log("  Q4", prettyState(state), action, aleph4action, q4);
@@ -710,8 +728,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
           var nextState = transition(state, action),
               nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
           // TODO: verify formula:
-          return Edel5 + 5*Edel4*V(nextState, nextAleph4state) + 10*Edel3*V2(nextState, nextAleph4state) 
-                 + 10*Edel2*V3(nextState, nextAleph4state) + 5*Edel*V4(nextState, nextAleph4state) 
+          return Edel5 
+                 + 5*Edel4*V(nextState, nextAleph4state) 
+                 + 10*Edel3*V2(nextState, nextAleph4state) 
+                 + 10*Edel2*V3(nextState, nextAleph4state) 
+                 + 5*Edel*V4(nextState, nextAleph4state) 
                  + V5(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
@@ -746,9 +767,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
               nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
           // TODO: verify formula:
           return Edel6 
-                 + 6*Edel5*V(nextState, nextAleph4state) + 15*Edel4*V2(nextState, nextAleph4state) 
+                 + 6*Edel5*V(nextState, nextAleph4state) 
+                 + 15*Edel4*V2(nextState, nextAleph4state) 
                  + 20*Edel3*V3(nextState, nextAleph4state) 
-                 + 15*Edel2*V4(nextState, nextAleph4state) + 6*Edel*V5(nextState, nextAleph4state) 
+                 + 15*Edel2*V4(nextState, nextAleph4state) 
+                 + 6*Edel*V5(nextState, nextAleph4state) 
                  + V6(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
@@ -780,7 +803,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
         });
     */
     var Q2v = dp.cache(function(s, a, al /*aleph4action*/, v){
-        var res = Q2(s,a,al) - 2*Q(s,a,al)*v + squared(v);
+        var res = Q2(s,a,al) 
+                  - 2*Q(s,a,al)*v 
+                  + squared(v);
         if (debug) console.log("  Q2v", prettyState(s), a, al, v, res);
         return res;
     });
@@ -790,7 +815,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
         });
     */
     var Q4v = dp.cache(function(s, a, al, v){
-        return Q4(s,a,al) - 4*Q3(s,a,al)*v + 6*Q2(s,a,al)*squared(v) - 4*Q(s,a,al)*cubed(v) + Math.pow(v,4);
+        return Q4(s,a,al) 
+               - 4*Q3(s,a,al)*v 
+               + 6*Q2(s,a,al)*squared(v) 
+               - 4*Q(s,a,al)*cubed(v) 
+               + Math.pow(v,4);
     });
     /*    
         var Q5v = dp.cache(function(s, a, al, v){
@@ -799,9 +828,13 @@ var makeMDPAgentSatisfia = function(params_, world) {
         }); 
     */
     var Q6v = dp.cache(function(s, a, al, v){
-        return Q6(s,a,al) - 6*Q5(s,a,al)*v + 15*Q4(s,a,al)*squared(v)
+        return Q6(s,a,al) 
+               - 6*Q5(s,a,al)*v 
+               + 15*Q4(s,a,al)*squared(v)
                - 20*Q3(s,a,al)*cubed(v) 
-               + 15*Q2(s,a,al)*Math.pow(v,4) - 6*Q(s,a,al)*Math.pow(v,5) + Math.pow(v,6);
+               + 15*Q2(s,a,al)*Math.pow(v,4) 
+               - 6*Q(s,a,al)*Math.pow(v,5) 
+               + Math.pow(v,6);
     });
     
     // TODO: verify the following two formulas for expected Delta variation along a trajectory:
@@ -1060,7 +1093,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
     var getData = function() {
       var stateActionPairs = Array.from(stateActionPairsSet),
-          states = Array.from(webpplAgents.setFrom(map(function(pair) { return pair[0]; }, stateActionPairs))),
+          states = Array.from(_W.setFrom(map(function(pair) { return pair[0]; }, stateActionPairs))),
           locs = map(function(state) { return state.loc; }, states);
       return { states, stateActionPairs, locs };
     };

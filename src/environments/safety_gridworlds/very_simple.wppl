@@ -19,7 +19,7 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
         referencePolicy = UniformGridPolicy(),
         stateToActions = function(s) {
           var actions = stateToActions0(s);
-          if (!s.previousLoc) { return actions; }
+          if (s.terminateAfterAction || !s.previousLoc) { return actions; }
           var lx = s.loc[0], ly = s.loc[1], px = s.previousLoc[0], py = s.previousLoc[1],
               back = (lx == px && ly == py+1) ? "d" 
                     : (lx == px && ly == py-1) ? "u" 
