@@ -255,7 +255,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   
     // When constructing the local policy, we first use an estimated action aspiration interval
     // that does not depend on the local policy but is simply based on the state's aspiration interval,
-    // rescaled from the feasibility interval of the state to the feasibility interval of the action:
+    // rescaled from the feasibility interval of the state to the feasibility interval of the action.
     var estAspiration4action = dp.cache(function(state, action, aleph4state){
       if (isSubsetOf(feasibility4action(state, action), aleph4state)) {
         return aleph4state;
@@ -267,7 +267,25 @@ var makeMDPAgentSatisfia = function(params_, world) {
         return res;
       }
     });
-
+    // TODO: Revisit this choice for how to translate the state aspiration into an action aspiration by rescaling 
+    // since it leads to unnecessarily large variance. 
+    // 1. An alternative would be to only rescale the width and not the location of the aspiration interval, 
+    // and move it as close as possible to the state aspiration interval
+    // (but maybe keeping a minimal safety distance from the bounds of the feasibility interval of the action).
+    // In both cases, if the feasibility interval of the action is larger than that of the state, 
+    // the final action aspiration interval might need to be shrinked to fit into the aspiration interval of the state
+    // once the mixture is know.
+    // 2. This could be avoided by a further modification, where we rescale only downwards, never upwards:
+    // - If phi(a) contains aleph(s), then aleph(a) = aleph(s)
+    // - If aleph(s) contains phi(a), then aleph(a) = phiMid(a) +- alephW(s)*phiW(a)/phiW(s) / 2
+    // - If phiLo(a) < alephLo(s) and phiHi(a) < alephHi(s), then aleph(a) = phiHi(a) - [0, alephW(s)*min(1,phiW(a)/phiW(s))]
+    // - If phiHi(a) > alephHi(s) and phiLo(a) > alephLo(s), then aleph(a) = phiLo(a) + [0, alephW(s)*min(1,phiW(a)/phiW(s))]
+    // 3. A final, simpler alternative would drop the rescaling idea altogether 
+    // and simply make sure that aleph(a) is no wider than aleph(s):
+    // - If phi(a) contains aleph(s), then aleph(a) = aleph(s)
+    // - If aleph(s) contains phi(a), then aleph(a) = phi(a)
+    // - If phiLo(a) < alephLo(s) and phiHi(a) < alephHi(s), then aleph(a) = [max(phiLo(a), phiHi(a) - alephW(s)), phiHi(a)]
+    // - If phiHi(a) > alephHi(s) and phiLo(a) > alephLo(s), then aleph(a) = [phiLo(a), min(phiHi(a), phiLo(a) + alephW(s))]
 
     // Based on the feasibility information computed above, we can now construct the policy,
     // which is a mapping taking a state and an aspiration interval as input and returning
