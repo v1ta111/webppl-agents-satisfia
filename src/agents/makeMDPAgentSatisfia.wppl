@@ -330,14 +330,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
       // and use it to construct propensities (probability weights) for choosing actions.
       // since we don't know the actual probabilities of actions yet (we will determine those only later),
       // but the loss estimation requires an estimate of the probability of the chosen action,
-      // we estimate the probability at 1 if the action's feasibility interval covers aleph, 
-      // and 0.5 otherwise because then the local policy will mix two actions:
+      // we estimate the probability at 1 / number of actions:
       var indices = Array.from(actions.keys()),
           losses = map(function(index) { 
               var action = actions[index];
-              return combinedLoss(state, action, aleph4state, estAlephs4action[index], 
-                                  isSubsetOf(aleph4state, feasibility4action(state, action)) ? 1.0 : 0.5); 
-            }, indices),  // TODO: revisit the choice of 1.0 and 0.5 here since the final local policy mixed many more actions after all... Maybe use 1/#actions instead as an noninformative prior?
+              return combinedLoss(state, action, aleph4state, estAlephs4action[index], 1 / indices.length); 
+            }, indices), 
           propensities = map(function(index) { 
               var action = actions[index];
               return Math.min(1e100, Math.max(Math.exp(-losses[index] / lossTemperature), 1e-100)); 
