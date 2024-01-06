@@ -15,7 +15,7 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
         f0 = world.feature, 
         feature = function(s) {return extend(f0(s), {test: "TODO: what does this do?"})},
         expectedDelta = tableToExpectedDeltaFct(d.expectedDeltaTable, feature, d.timeOutDelta || timeOutDelta),
-        uninformedPolicy = undefined,
+        uninformedPolicy = UniformGridPolicy(),
         referencePolicy = UniformGridPolicy(),
         stateToActions = function(s) {
           var actions = stateToActions0(s);
@@ -51,7 +51,7 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
           'G3': 3,
           ' ': 0
         },
-        aleph0: [1.7,2.3],
+        aleph0: [1.9,2.1],
         totalTime: time || 10
       });
     /*
@@ -78,7 +78,7 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
           'Gc': deltas[2],
           ' ': 0
         },
-        aleph0: 2,
+        aleph0: [1.9,2.1],
         totalTime: time || 10
       });
     /*
@@ -106,7 +106,7 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
           'Gd': deltas[3],
           ' ': 0
         },
-        aleph0: 2,
+        aleph0: [1.9,2.1],
         totalTime: time || 10
       });
     /*
@@ -133,12 +133,12 @@ var VerySimpleGW = function(gw, parms, time, timeOutDelta) {
           'Gd': deltas[3],
           ' ': 0
         },
-        aleph0: 1.5,  // !
+        aleph0: [1.4,1.6],  // !
         totalTime: time || 10
       });
     /*
     Desired: flip a coin and go to one of the Gs that give 1 or 2
-    TODO: doesn't work yet with webppl --require webppl-dp --require . examples/runVerySimpleGW.wppl -- --gw GW4 --time 4, it gives huge cupLoss
+    TODO: doesn't work yet with webppl --require webppl-dp --require . examples/runVerySimpleGW.wppl -- --gw GW4 --lossCoeff4Variance 100, it runs to 0 and 2 rather than 1 and 2...
     */
   } else if (gw == "GW6") {
     var G1 = { name : 'G1' },

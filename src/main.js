@@ -68,25 +68,45 @@ module.exports = {
     },
 
     trajDist2LocActionData: function (trajDist, trajData) {
-        var keys = Object.keys(trajDist), V = {}, Q = {}, cupLoss = {}, actionFreq = {};
+        var keys = Object.keys(trajDist), 
+            V = {}, 
+            Q = {},
+            cupLoss = {},
+            messingPotential = {},
+            combinedLoss = {},
+            actionFrequency = {};
         for (var index in keys) {
-            var trajString = keys[index], data = trajData[index],
-                traj = JSON.parse(trajString), val = trajDist[trajString], prob = val.prob;
+            var trajString = keys[index], 
+                data = trajData[index],
+                traj = JSON.parse(trajString), 
+                val = trajDist[trajString], 
+                prob = val.prob;
             for (var t in traj) {
-                var stepData = traj[t], additionalData = data[t],
-                    state = stepData.state, action = stepData.action, loc = JSON.stringify(state.loc);
+                var stepData = traj[t], 
+                    additionalData = data[t],
+                    state = stepData.state, 
+                    action = stepData.action, 
+                    loc = JSON.stringify(state.loc);
 //                char[loc] = state.name[0];
-                var freq = actionFreq[loc], q = Q[loc];
+                var freq = actionFrequency[loc], 
+                    q = Q[loc],
+                    cL = cupLoss[loc],
+                    combined = combinedLoss[loc],
+                    mP = messingPotential[loc];
                 V[loc] = Math.max(V[loc] || -1e10, additionalData.V);
-                if (!Q[loc]) { Q[loc] = q = {}; }
-                if (!cupLoss[loc]) { cupLoss[loc] = c = {}; }
+                if (!q) { q = Q[loc] = {}; }
+                if (!cL) { cL = cupLoss[loc] = {}; }
+                if (!combined) { combined = combinedLoss[loc] = {}; }
+                if (!mP) { mP = messingPotential[loc] = {}; }
                 q[action] = Math.max(q[action] || -1e10, additionalData.Q);
-                c[action] = Math.max(c[action] || -1e10, additionalData.cupLoss);
-                if (!freq) { actionFreq[loc] = freq = {}; }
+                cL[action] = Math.max(cL[action] || -1e10, additionalData.cupLoss);
+                combined[action] = Math.max(combined[action] || -1e10, additionalData.combinedLoss);
+                mP[action] = Math.max(mP[action] || -1e10, additionalData.messingPotential);
+                if (!freq) { actionFrequency[loc] = freq = {}; }
                 freq[action] = (freq[action] || 0) + prob;
             }
         }
-        return { V, Q, cupLoss, actionFreq };
+        return { V, Q, cupLoss, messingPotential, combinedLoss, actionFrequency };
     },
 
     locActionData2ASCII: function (

@@ -1,11 +1,19 @@
 // SatisfIA aspiration-based non-maximizing agent 
 // with aspiration rescaling and several adjustable safety criteria.
 
+// TODO: see https://github.com/orgs/pik-gane/projects/2
+
+/* Note on terminology and variable naming: 
+ * - delta is what others call reward
+ * - total is what others call return
+ * - phi is a feasibility interval for a state or state-action
+ * - aleph is an aspiration interval for a state or state-action
+ */
+
 /*
 
-TODO: see https://github.com/orgs/pik-gane/projects/2
-
 Notes on how to port this WebPPL code to Python:
+==================================================
 
 - The main difficulty will be replacing WebPPL's expectation() function 
   by an explicit calculation of the expected value as a weighted sum over
@@ -45,14 +53,75 @@ Notes on how to port this WebPPL code to Python:
           f_cache[(x, y, z)] = ...
         return f_cache[(x, y, z)]
         
+
+Notes on how to turn the model-based planning approach into a model-free learning approach:
+=============================================================================================
+
+DQN-like approach (try this one first)
+----------------------------------------
+
+One approach is similar to DQN, where the main table (Q) was replaced by an ANN.
+
+In our case, we have more than one relevant table (or rather function) 
+that needs to be approximated because it depends on unknown transition probabilities 
+and cannot be computed cheaply from the other quantities:
+
+- min/maxFeasibleQ and messingPotential_action can in principle be learned just as in DQN. 
+
+- Q, Q2, ..., Q6, Q_DeltaSquare, Q_ones and LRAdev/behaviorEntropy/behaviorKLdiv_action
+  can also be approximated by suitable ANNs,
+  even though they have aleph (and sometimes p(a)) as additional input.
+
+All these fulfil a Bellman equation, so they can be learned by a temporal difference learning approach 
+with a suitable learning target (e.g., "expected SARSA" targets using the current policy based on the current estimates).
+The other functions are cheap to compute and can be computed from the other quantities.
+
+In order to guarantee consistency relationships between these quantities (see dedicated task on Kanban board),
+some of the learned approximations must be composed from several ANNs in suitable ways. 
+E.g., to approximate min/maxFeasibleQ, we learn two unbounded ANNs phi1, phi2 and then put
+  - minFeasibleQ = phi1 - max(0, phi2)
+  - maxFeasibleQ = phi1 + max(0, phi2),
+so that always minFeasibleQ <= maxFeasibleQ. Given learning targets qLo, qHi for min/maxFeasibleQ, 
+we must then transform them into learning targets tau1, tau2 for phi1, phi2 according to
+  - tau1 = (qLo + qHi) / 2
+  - tau2 = (qHi - qLo) / 2.
+
+Similarly, to approximate Q,Q2,...,Q6, we learn six unbounded ANNs phi1,...,phi6 and then put 
+  - Q = min(max(minFeasibleQ, phi1), maxFeasibleQ)
+  - Q2 = 2*Q + max(0, phi2)
+  - Q3 = 2*Q2 - Q + max(0, phi3)
+  - Q4 = 2*Q3 - Q2 + max(0, phi4)
+  - Q5 = 2*Q4 - Q3 + max(0, phi5)
+  - Q6 = 2*Q5 - Q4 + max(0, phi6,
+so that the known relationships between Q,Q2,...,Q6 and min/maxFeasibleQ are fulfilled.
+and given learning targets q,q2,...,q6 for Q,Q2,...,Q6, we must then transform them into targets for phi1...6:
+  - tau1 = q1
+  - tau2 = q2 - 2*q1
+  - tau3 = q3 - 2*q2 + q1
+  - tau4 = q4 - 2*q3 + q2
+  - tau5 = q5 - 2*q4 + q3
+  - tau6 = q6 - 2*q5 + q4
+
+E.g., to update phi1..3 after performing action a in state s, receiving some delta and ending up in state s',
+we first compute the targets for q,q2,q3 from the current estimates of Q,Q2,Q3 
+and the respective Bellman equations (see code for Q,Q2,Q3 below),
+  - q = delta + E(Q(s',a') | pi(s'))
+  - q2 = delta**2 + 2*delta*E(Q(s',a') | pi(s')) + E(Q2(s',a') | pi(s'))
+  - q3 = delta**3 + 3*delta**2*E(Q(s',a') | pi(s')) + 3*delta*E(Q2(s',a') | pi(s')) + E(Q3(s',a') | pi(s'))
+where pi(s') is the local policy for state s' as computed from the current (if we use on-policy learning) 
+or frozen (if we use off-policy learning) estimates Q,Q2,Q3,... and so on.
+Then we use the above formulas to compute tau1...3 from q1...3. 
+Based on tau1...3, we compute the loss functions for phi1...3 and their gradients.
+Finally, we use gradient descent to adjust the parameters of phi1...3.
+
+
+Policy-gradient approach
+--------------------------
+
+An alternative (but much less clear) approach is to use a policy gradient method,
+where not Q but the policy directly is represented by an ANN.
 */
 
-/* Note on terminology and variable naming: 
- * - delta is what others call reward
- * - total is what others call return
- * - phi is a feasibility interval for a state or state-action
- * - aleph is an aspiration interval for a state or state-action
- */
 
 var _W = webpplAgents;
 
@@ -67,9 +136,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var params = extend(extend({
       maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)
       minLambda: 0, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-      lossCoeff4Cup: 0, // weight of "cup" loss component, must be >= 0
       lossCoeff4Variance: 1, // weight of variance of total in loss function, must be >= 0
       lossCoeff4Fourth: 0, // weight of centralized fourth moment of total in loss function, must be >= 0
+      lossCoeff4Cup: 0, // weight of "cup" loss component, based on sixth moment of total, must be >= 0
       lossCoeff4DeltaVariation: 0, // weight of variation of Delta in loss function, must be >= 0
       lossCoeff4LRA: 0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
       lossCoeff4MP: 0, // weight of messing potential in loss function, must be >= 0
@@ -147,6 +216,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     assert.ok(lossTemperature > 0, "lossTemperature must be > 0");
     assert.ok(0 <= rescaling4Actions <= 1, "rescaling4Actions must be in 0...1");
     assert.ok(0 <= rescaling4Successors <= 1, "rescaling4Successors must be in 0...1");
+    assert.ok(lossCoeff4Entropy == 0 || lossCoeff4MP == 0 || uninformedPolicy != undefined, "uninformedPolicy must be provided if lossCoeff4MP > 0 or lossCoeff4Entropy > 0");
   
     if (debug) console.log("makeMDPAgentSatisfia using parameters", params);
   
@@ -399,6 +469,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
             var estAleph2 = estAlephs4action[i2],
                 mid2 = midpoint(estAleph2),
                 p = relativePosition(mid1, midTarget, mid2);
+            // FIXME: in GW4, this leads to going right at the beginning, because that allows 
+            // to keep aspiration [1.4,1.6] exactly for the first step, while going down would
+            // reduce aspiration to [1,1]. It seems our current heuristic incentivizes the agent
+            // to postpone randomizing as long as possible, which is not what we want.
 
             // Now we find the largest relative size of aleph1 and aleph2 
             // so that their mixture is still contained in aleph4state:
@@ -537,6 +611,34 @@ var makeMDPAgentSatisfia = function(params_, world) {
           var res = interpolate(steadfastAleph4nextState, rescaling4Successors, rescaledAleph4nextState);      
           if (debug) console.log(" propagateAspiration", prettyState(state), action, aleph4action, Edel, prettyState(nextState), res);
           return res;
+
+          /* Note on influence of Edel: 
+          It might seem that the (expected) delta received when taking action a in state s should occur
+          explicitly in some form in this formula, similar to how it occurred in the steadfast formula above.
+          This is not so, however. The expected delta is taken account of *implicitly* in the rescaling formula
+          via the use of min/maxFeasibleQ(s,a) to compute lam but using min/maxFeasibleV(s') in interpolating.
+          More precisely, one can prove that aspirations are kept in expectation. We want
+
+            aleph(s,a) = E(delta(s,a)) + E(aleph(s') | s'~(s,a)).
+          
+          This can be shown to be true as follows:
+          
+            min/maxFeasibleQ(s,a) = E(delta(s,a)) + E(min/maxFeasibleV(s') | s'~(s,a)),
+            
+            lamdba = (aleph(s,a) - minFeasibleQ(s,a)) / (maxFeasibleQ(s,a) - minFeasibleQ(s,a)),
+            
+            rescaledAleph(s') = minFeasibleV(s') + lambda * (maxFeasibleV(s') - minFeasibleV(s')),
+            
+            E(delta(s,a)) + E(rescaledAleph(s') | s'~(s,a)) 
+            = E(delta(s,a)) + E(minFeasibleV(s') | s'~(s,a)) 
+              + lambda * (E(maxFeasibleV(s') | s'~(s,a)) - E(minFeasibleV(s') | s'~(s,a)))
+            = minFeasibleQ(s,a) + lambda * (maxFeasibleQ(s,a) - minFeasibleQ(s,a))
+            = minFeasibleQ(s,a) + (aleph(s,a) - minFeasibleQ(s,a))
+            = aleph(s,a).
+
+          So the above rescaling formula is correctly taking account of received delta even without explicitly
+          including Edel in the formula.
+          */
         }
       }
     // )
@@ -840,6 +942,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // Expected total of squared Deltas, for computing the expected Delta variation along a trajectory:
     // ! recursive function:
     var Q_DeltaSquare = dp.cache(function(state, action, aleph4action){
+      // Note for ANN approximation: Q_DeltaSquare must be nonnegative. 
       var qDsq = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action),
             EdelSq = squared(Edel) + varianceOfDelta(state, action);
@@ -868,6 +971,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // Expected total of ones (= expected length of trajectory), for computing the expected Delta variation along a trajectory:
     // ! recursive function:
     var Q_ones = dp.cache(function(state, action, aleph4action){
+      // Note for ANN approximation: Q_ones must be nonnegative. 
       var q_ones = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action);
         if (state.terminateAfterAction){
@@ -896,15 +1000,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
   
     // Squared deviation of local relative aspiration (midpoint of interval) from 0.5:
     // recursive function:
-    var LRAdev_state = dp.cache(function(state, aleph4state) {
-      var locPol = localPolicy(state, aleph4state);
-      return expectation(Infer({ model() { 
-        var actionAndAleph = sample(locPol);  // ! recursion here !
-        return LRAdev_action(state, actionAndAleph[0], actionAndAleph[1]); // ! recursion here !
-      }}));
-    });
-    // recursive function:
     var LRAdev_action = dp.cache(function(state, action, aleph4action) {
+      // Note for ANN approximation: LRAdev_action must be between 0 and 0.25 
       var Edel = expectedDelta(state, action),
           res = expectation(Infer({ model() {
             var localLRAdev = squared(0.5 - relativePosition(minFeasibleQ(state, action), midpoint(aleph4action), maxFeasibleQ(state, action)));
@@ -918,25 +1015,26 @@ var makeMDPAgentSatisfia = function(params_, world) {
           }}));
       return res;
     });
+    // recursive function:
+    var LRAdev_state = dp.cache(function(state, aleph4state) {
+      var locPol = localPolicy(state, aleph4state);
+      return expectation(Infer({ model() { 
+        var actionAndAleph = sample(locPol);  // ! recursion here !
+        return LRAdev_action(state, actionAndAleph[0], actionAndAleph[1]); // ! recursion here !
+      }}));
+    });
   
     // Shannon entropy of behavior
     // (actually, negative KL divergence relative to uninformedPolicy (e.g., a uniform distribution),
     // to be consistent under action cloning or action refinement):
     // recursive function:
-    var behaviorEntropy_state = dp.cache(function(state, aleph4state) {
-      var locPol = localPolicy(state, aleph4state);
-      return expectation(Infer({ model() { 
-        var actionAndAleph = sample(locPol);  // ! recursion here !
-        return behaviorEntropy_action(state, Math.exp(locPol.score(actionAndAleph)), 
-                                      actionAndAleph[0], actionAndAleph[1]); // ! recursion here !
-      }}));
-    });
-    // recursive function:
     var behaviorEntropy_action = dp.cache(function(state, actionProbability, action, aleph4action) {
+      // Note for ANN approximation: behaviorEntropy_action must be <= 0 (!) 
+      // because it is the negative (!) of a KL divergence. 
       var Edel = expectedDelta(state, action),
           res = expectation(Infer({ model() {
-            var defaultPolicy = uninformedPolicy ? uninformedPolicy(state) : undefined,
-                localEntropy = (defaultPolicy ? defaultPolicy.score(action) : 0) 
+            var uninfPol = uninformedPolicy ? uninformedPolicy(state) : undefined,
+                localEntropy = (uninfPol ? uninfPol.score(action) : 0) 
                     - Math.log(actionProbability)
                     + (internalActionEntropy ? internalActionEntropy(state, action) : 0);
             if (state.terminateAfterAction){
@@ -949,18 +1047,20 @@ var makeMDPAgentSatisfia = function(params_, world) {
           }}));
       return res;
     });
-  
-    // KL divergence of behavior relative to refPolicy (or uninformedPolicy if refPolicy is undefined):
     // recursive function:
-    var behaviorKLdiv_state = dp.cache(function(state, aleph4state) {
+    var behaviorEntropy_state = dp.cache(function(state, aleph4state) {
       var locPol = localPolicy(state, aleph4state);
       return expectation(Infer({ model() { 
         var actionAndAleph = sample(locPol);  // ! recursion here !
-        return behaviorKLdiv_action(state, Math.exp(locPol.score(actionAndAleph)), actionAndAleph[0], actionAndAleph[1]); // ! recursion here !
+        return behaviorEntropy_action(state, Math.exp(locPol.score(actionAndAleph)), 
+                                      actionAndAleph[0], actionAndAleph[1]); // ! recursion here !
       }}));
     });
+  
+    // KL divergence of behavior relative to refPolicy (or uninformedPolicy if refPolicy is undefined):
     // recursive function:
     var behaviorKLdiv_action = dp.cache(function(state, actionProbability, action, aleph4action) {
+      // Note for ANN approximation: behaviorKLdiv_action must be nonnegative. 
       var refPol = referencePolicy ? referencePolicy(state) : uninformedPolicy ? uninformedPolicy(state) : undefined;
       if (refPol) {
         var Edel = expectedDelta(state, action),
@@ -979,23 +1079,20 @@ var makeMDPAgentSatisfia = function(params_, world) {
         return undefined;
       }
     });
+    // recursive function:
+    var behaviorKLdiv_state = dp.cache(function(state, aleph4state) {
+      var locPol = localPolicy(state, aleph4state);
+      return expectation(Infer({ model() { 
+        var actionAndAleph = sample(locPol);  // ! recursion here !
+        return behaviorKLdiv_action(state, Math.exp(locPol.score(actionAndAleph)), actionAndAleph[0], actionAndAleph[1]); // ! recursion here !
+      }}));
+    });
   
     // state's messing potential (maximal entropy (relative to some uninformedStatePrior) 
     // over trajectories any agent could produce from here):
     // recursive function:
-    var messingPotential_state = dp.cache(function(state) {
-      // FIXME: this can probably be simplified tremendously. I think the expectation is equal to the log of the normalization constant of maxMPpolicy, or its negative:
-      var actions = stateToActions(state),
-          weights = map(function(a) { return Math.exp(messingPotential_action(state, a)); }, actions),
-          maxMPpolicy = Categorical({vs: actions, ps: weights});
-      var MP = expectation(Infer({ model() {
-                var action = sample(maxMPpolicy); 
-                return messingPotential_action(state, action) - maxMPpolicy.score(action); // ! recursion here !
-            }}));
-      return MP;
-    });
-    // recursive function:
     var messingPotential_action = dp.cache(function(state, action) {
+      // Note for ANN approximation: messingPotential_action can be positive or negative. 
       var MP = expectation(Infer({ model() {
             if (state.terminateAfterAction){
               return 0;
@@ -1009,6 +1106,13 @@ var makeMDPAgentSatisfia = function(params_, world) {
           }}));
       return MP;
     });
+    // recursive function:
+    var messingPotential_state = dp.cache(function(state) {
+      var actions = stateToActions(state),
+          maxMPpolicyWeights = map(function(a) { return Math.exp(messingPotential_action(state, a)); }, actions), 
+          MP = Math.log(sum(maxMPpolicyWeights));
+      return MP;
+    });
   
     // TODO: the following should maybe better be w.r.t. the initial aspiration interval, not the current state's:
 
@@ -1016,6 +1120,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // that is almost completely flat in the middle half of the interval 
     // (https://www.wolframalpha.com/input?i=plot+%28x-.5%29%5E6+from+0+to+1):
 
+    var cupLoss_action = dp.cache(function(state, action, aleph4state, aleph4action){
+      var res = Q6v(state, action, aleph4action, midpoint(aleph4state));
+      if (debug) console.log("  cupLoss_action", prettyState(state), action, aleph4state, res);
+      return res;
+    });
     // recursive function:
     var cupLoss_state = dp.cache(function(state, unclippedAleph){
       var aleph4state = aspiration4state(state, unclippedAleph),
@@ -1026,21 +1135,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
       }
       }));
     });
-    var cupLoss_action = dp.cache(function(state, action, aleph4state, aleph4action){
-      var res = Q6v(state, action, aleph4action, midpoint(aleph4state));
-      if (debug) console.log("  cupLoss_action", prettyState(state), action, aleph4state, res);
-      return res;
-    });
 
     // other loss:
-    // recursive function:
-    var otherLoss_state = dp.cache(function(state, aleph4state) {
-      var locPol = localPolicy(state, aleph4state); // ! recursion here !
-      return expectation(Infer({ model() { 
-        var actionAndAleph = sample(locPol);
-        return otherLoss_action(state, actionAndAleph[0], actionAndAleph[1])  // ! recursion here !
-      }}));
-    });
     // recursive function:
     var otherLoss_action = dp.cache(function(state, action, aleph4action) {
       var Edel = expectedDelta(state, action),
@@ -1055,6 +1151,14 @@ var makeMDPAgentSatisfia = function(params_, world) {
             }
           }}));
       return loss;
+    });
+    // recursive function:
+    var otherLoss_state = dp.cache(function(state, aleph4state) {
+      var locPol = localPolicy(state, aleph4state); // ! recursion here !
+      return expectation(Infer({ model() { 
+        var actionAndAleph = sample(locPol);
+        return otherLoss_action(state, actionAndAleph[0], actionAndAleph[1])  // ! recursion here !
+      }}));
     });
   
     var randomTieBreaker = dp.cache(function(state, action) { return Math.random(); });

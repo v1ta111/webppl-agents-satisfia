@@ -96,18 +96,28 @@ var stateActionFct2ASCII = function(stateActionFct, stateActionPairs) {
 };
 
 var trajDist2TrajData = function(trajDist, agent) {
-    var keys = Object.keys(trajDist), V = agent.V, Q = agent.Q; 
-    var trajData = map(function(key) { 
-        var traj = JSON.parse(key);
-        return map(function(stepData) {
-            var state = stepData.state, aleph4state=stepData.aleph4state, action = stepData.action, aleph4action = stepData.aleph4action, Edel = stepData.Edel;
-            return {
-                aleph: aleph4state,
-                V: V(state, aleph4state),
-                Q: Q(state, action, aleph4action)
-            };
-        }, traj);
-    }, keys);
+    var keys = Object.keys(trajDist), 
+        V = agent.V, Q = agent.Q, 
+        cupLoss = agent.cupLoss_action, 
+        messingPotential = agent.messingPotential_action,
+        combinedLoss = agent.combinedLoss,
+        trajData = map(function(key) { 
+            var traj = JSON.parse(key);
+            return map(function(stepData) {
+                var state = stepData.state, 
+                    aleph4state = stepData.aleph4state, 
+                    action = stepData.action, 
+                    aleph4action = stepData.aleph4action;
+                return {
+                    aleph: aleph4state,
+                    V: V(state, aleph4state),
+                    Q: Q(state, action, aleph4action),
+                    cupLoss: cupLoss(state, action, aleph4state, aleph4action),
+                    combinedLoss: combinedLoss(state, action, aleph4state, aleph4action, 1.0),
+                    messingPotential: messingPotential(state, action),
+                };
+            }, traj);
+        }, keys);
     return trajData;
 };
 

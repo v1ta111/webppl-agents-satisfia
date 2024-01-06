@@ -27,6 +27,7 @@ var env = getEnv(),
     V2 = agent.V2,
     entropy = agent.behaviorEntropy_state, 
     KLdiv = agent.behaviorKLdiv_state,
+    messingPotential = agent.messingPotential_state,
     cupLoss = agent.cupLoss_state;
 
 // Generate and draw a trajectory:
@@ -61,9 +62,10 @@ var t0 =  webpplAgents.time();
 // verify meeting of expectations:
 console.log("V", V(startState, aleph0));
 console.log("TIME:", webpplAgents.time() - t0, "ms");
+console.log("cupLoss", cupLoss(mdp.startState, aleph0));
 console.log("entropy", entropy(mdp.startState, aleph0));
 console.log("KLdiv", KLdiv(mdp.startState, aleph0));
-console.log("cupLoss", cupLoss(mdp.startState, aleph0));
+console.log("messPot", messingPotential(mdp.startState, aleph0));
 
 var gd = agent.getData, agentData = gd();
 
@@ -89,9 +91,15 @@ console.log(stateActionFct2ASCII(agent.maxFeasibleQ, agentData.stateActionPairs)
 
 console.log("\nQ:");
 console.log(webpplAgents.locActionData2ASCII(locActionData.Q));
+console.log("\ncupLoss:");
+console.log(webpplAgents.locActionData2ASCII(locActionData.cupLoss));
+console.log("\nmessingPotential:");
+console.log(webpplAgents.locActionData2ASCII(locActionData.messingPotential));
+console.log("\ncombinedLoss:");
+console.log(webpplAgents.locActionData2ASCII(locActionData.combinedLoss));
 
 console.log("\naction frequencies:");
-console.log(webpplAgents.locActionData2ASCII(locActionData.actionFreq));
+console.log(webpplAgents.locActionData2ASCII(locActionData.actionFrequency));
 
 
 
