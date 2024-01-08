@@ -444,11 +444,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
             phi1 = feasibility4action(state, a1),
             phi1Lo = phi1[0], phi1Hi = phi1[1];
 
-        if (debug) console.log("| localPolicyData", prettyState(state), aleph4state, {a1, phi1});
-
         // If a1's feasibility interval is completely contained in aleph4state, we are done:
         if (isSubsetOf(phi1, aleph4state)) {
 
+          if (verbose || debug) console.log("| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1",a1,"phi1",phi1,"(subset of aleph4state)");
           return [a1, phi1];
 
         } else {
@@ -508,6 +507,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
               aleph2 = [mid2 - x * w2, mid2 + x * w2];
                 
           if (debug) console.log("| localPolicyData",prettyState(state), aleph4state, {a1, estAleph1, phi1, w1, a2, estAleph2, phi2, w2, p, w, x, aleph1, aleph2});
+
+          if (verbose || debug) console.log("| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1,p,a2",a1,p,a2,"phi12",phi1,phi2,"aleph12",aleph1,aleph2);
 
           return sample(Categorical({vs: [[a1, aleph1], [a2, aleph2]], ps: [1-p, p]}));
 
