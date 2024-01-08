@@ -76,31 +76,44 @@ All these fulfil a Bellman equation, so they can be learned by a temporal differ
 with a suitable learning target (e.g., "expected SARSA" targets using the current policy based on the current estimates).
 The other functions are cheap to compute and can be computed from the other quantities.
 
-In order to guarantee consistency relationships between these quantities (see dedicated task on Kanban board),
-some of the learned approximations must be composed from several ANNs in suitable ways. 
-E.g., to approximate min/maxFeasibleQ, we learn two unbounded ANNs phi1, phi2 and then put
-  - minFeasibleQ = phi1 - max(0, phi2)
-  - maxFeasibleQ = phi1 + max(0, phi2),
+In order to guarantee consistency relationships between these quantities,
+some of the learned approximations must be composed from several ANNs in suitable ways
+(see dedicated task on Kanban board).
+E.g., to approximate min/maxFeasibleQ, we learn two unbounded ANNs phiM, phiW and then put
+  - minFeasibleQ = phiM - max(0, phiW/2)
+  - maxFeasibleQ = phiM + max(0, phiW/2),
 so that always minFeasibleQ <= maxFeasibleQ. Given learning targets qLo, qHi for min/maxFeasibleQ, 
-we must then transform them into learning targets tau1, tau2 for phi1, phi2 according to
-  - tau1 = (qLo + qHi) / 2
-  - tau2 = (qHi - qLo) / 2.
-
-Similarly, to approximate Q,Q2,...,Q6, we learn six unbounded ANNs phi1,...,phi6 and then put 
-  - Q = min(max(minFeasibleQ, phi1), maxFeasibleQ)
-  - Q2 = 2*Q + max(0, phi2)
-  - Q3 = 2*Q2 - Q + max(0, phi3)
-  - Q4 = 2*Q3 - Q2 + max(0, phi4)
-  - Q5 = 2*Q4 - Q3 + max(0, phi5)
-  - Q6 = 2*Q5 - Q4 + max(0, phi6,
-so that the known relationships between Q,Q2,...,Q6 and min/maxFeasibleQ are fulfilled.
-and given learning targets q,q2,...,q6 for Q,Q2,...,Q6, we must then transform them into targets for phi1...6:
-  - tau1 = q1
-  - tau2 = q2 - 2*q1
-  - tau3 = q3 - 2*q2 + q1
-  - tau4 = q4 - 2*q3 + q2
-  - tau5 = q5 - 2*q4 + q3
-  - tau6 = q6 - 2*q5 + q4
+we must then transform them into learning targets tauM, tauW for phiM, phiW according to
+  - tauM = (qLo + qHi) / 2
+  - tauW = qHi - qLo
+To approximate Q, we learn an unbounded ANN phi1 and then put
+  - Q = min(max(minFeasibleQ, phi1), maxFeasibleQ).
+To approximate Q2,Q3,Q4,Q5,Q6, we can learn five unbounded ANNs phi2...6 and then put 
+  - l2 = phi2
+  - Q2 = Q**2 + exp(l2)
+  - z3 = phi3
+  - Q3 = z3 + 3*Q2*Q - 2*Q**3
+  - l4 = 2*l2 + max(0, phi4)
+  - Q4 = exp(l4) + 4*Q3*Q - 6*Q2*Q**2 + 3*Q**4
+  - z5 = phi5
+  - Q5 = z5 + 5*Q4*Q - 10*Q3*Q**2 + 10*Q2*Q**3 - 4*Q**5
+  - l6 = 2*l4 - l2 + max(0, phi6)
+  - Q6 = exp(l6) + 6*Q5*Q - 15*Q4*Q**2 + 20*Q3*Q**3 - 15*Q2*Q**4 + 5*Q**6
+In this, l2, l4, l6 model the logs of the 2th, 4th, 6th centralized moments of the total R,
+and z3, z5 model the 3th and 5th centralized moments of R, so that we have: 
+  - exp(l2) = E((R - Q)**2) = Q2 - Q**2
+  - z3 = E((R - Q)**3) = Q3 - 3*Q2*Q + 2*Q**3
+  - exp(l4) = E((R - Q)**4) = Q4 - 4*Q3*Q + 6*Q2*Q**2 - 3*Q**4
+  - z5 = E((R - Q)**5) = Q5 - 5*Q4*Q + 10*Q3*Q**2 - 10*Q2*Q**3 + 4*Q**5
+  - exp(l6) = E((R - Q)**6) = Q6 - 6*Q5*Q + 15*Q4*Q**2 - 20*Q3*Q**3 + 15*Q2*Q**4 - 5*Q**6
+The above formulas guarantee that the known relationships between Q,Q2,Q4,Q6 and min/maxFeasibleQ are fulfilled.
+and given learning targets q,q2,...,q6 for Q,Q2,...,Q6, we must then transform them into targets tau1...6 for phi1...6:
+  - tau1 = q
+  - tau2 = log(q2 - q**2)
+  - tau3 = q3 - 3*q2*q + 2*q**3
+  - tau4 = log(q4 - 4*q3*q + 6*q2*q**2 - 3*q**4) - 2*tau2
+  - tau5 = q5 - 5*q4*q + 10*q3*q**2 - 10*q2*q**3 + 4*q**5
+  - tau6 = log(q6 - 6*q5*q + 15*q4*q**2 - 20*q3*q**3 + 15*q2*q**4 - 5*q**6) - 2*(2*tau2 + tau4) + tau2
 
 E.g., to update phi1..3 after performing action a in state s, receiving some delta and ending up in state s',
 we first compute the targets for q,q2,q3 from the current estimates of Q,Q2,Q3 
@@ -110,7 +123,7 @@ and the respective Bellman equations (see code for Q,Q2,Q3 below),
   - q3 = delta**3 + 3*delta**2*E(Q(s',a') | pi(s')) + 3*delta*E(Q2(s',a') | pi(s')) + E(Q3(s',a') | pi(s'))
 where pi(s') is the local policy for state s' as computed from the current (if we use on-policy learning) 
 or frozen (if we use off-policy learning) estimates Q,Q2,Q3,... and so on.
-Then we use the above formulas to compute tau1...3 from q1...3. 
+Then we use the above formulas to compute tau1...3 from q,q2,q3. 
 Based on tau1...3, we compute the loss functions for phi1...3 and their gradients.
 Finally, we use gradient descent to adjust the parameters of phi1...3.
 
@@ -153,7 +166,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
       rescaling4Actions: 0, // degree (0...1) of aspiration rescaling from state to action. (larger implies larger variance)
       rescaling4Successors: 1, // degree (0...1) of aspiration rescaling from action to successor state. (expectation is only preserved if this is 1.0)
     }, params_), { options: extend({
-      debug: false
+      verbose: false,  // if true, print explanatory messages
+      debug: false  // if true, print extensive debugging messages
     }, params_.options) });
   
     // extract parameters, options, and world:
@@ -198,7 +212,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
         lossTemperature = params.lossTemperature,
         rescaling4Actions = params.rescaling4Actions,
         rescaling4Successors = params.rescaling4Successors;
-    var options = params.options, 
+    var options = params.options,
+        verbose = options.verbose, 
         debug = options.debug;
   
     assert.ok(allowNegativeCoeffs || lossCoeff4Cup >= 0, "lossCoeff4Cup must be >= 0");
@@ -218,7 +233,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     assert.ok(0 <= rescaling4Successors <= 1, "rescaling4Successors must be in 0...1");
     assert.ok(lossCoeff4Entropy == 0 || lossCoeff4MP == 0 || uninformedPolicy != undefined, "uninformedPolicy must be provided if lossCoeff4MP > 0 or lossCoeff4Entropy > 0");
   
-    if (debug) console.log("makeMDPAgentSatisfia using parameters", params);
+    if (verbose || debug) console.log("makeMDPAgentSatisfia with parameters", params);
   
     /*  The dependency/callback graph of the following functions is partially recursive 
         and involves aggregation (MIN, MAX, E) operations as follows:
@@ -264,6 +279,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // or of the LRA-based problem (if maxLambda<1):
     // ! recursive function:
     var maxFeasibleQ = dp.cache(function(state, action){
+      if (verbose || debug) console.log(pad(state),"| | | maxFeasibleQ, state",prettyState(state),"action",action,"...");
       stateActionPairsSet.add([state,action]); // register (state, action) in global store (could be anywhere, but here is just as fine as anywhere else)
       var Edel = expectedDelta(state, action),
           q = state.terminateAfterAction 
@@ -271,17 +287,18 @@ var makeMDPAgentSatisfia = function(params_, world) {
               : Edel + expectation(Infer({ model() { 
                 return maxFeasibleV(transition(state, action));  // ! recursion here ! 
               }}));  // Bellman equation
-      if (debug) console.log("   maxFeasibleQ", prettyState(state), action, q);
+      if (verbose || debug) console.log(pad(state),"| | | maxFeasibleQ, state",prettyState(state),"action",action,":",q);
       return q;
     });
     // ! recursive function:
     var maxFeasibleV = dp.cache(function(state){
+      if (verbose || debug) console.log(pad(state),"| | | maxFeasibleV, state",prettyState(state),"...");
       var actions = stateToActions(state),
           qs = map(function(a) { return maxFeasibleQ(state, a); }, actions),  // ! recursion here !
           v = maxLambda == 1 
               ? _W.max(qs) 
               : interpolate(_W.min(qs), maxLambda, _W.max(qs));
-      if (debug) console.log("   maxFeasibleV", prettyState(state), v);
+      if (verbose || debug) console.log(pad(state),"| | | maxFeasibleV, state",prettyState(state),":",v);
       return v;
     });
   
@@ -289,23 +306,25 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // or of the LRA-based problem (if minLambda>0):
     // ! recursive function:
     var minFeasibleQ = dp.cache(function(state, action){
+      if (verbose || debug) console.log(pad(state),"| | | minFeasibleQ, state",prettyState(state),"action",action,"...");
       var Edel = expectedDelta(state, action),
           q = state.terminateAfterAction 
               ? Edel 
               : Edel + expectation(Infer({ model() { 
                 return minFeasibleV(transition(state, action));  // ! recursion here !
               }}));
-      if (debug) console.log("   minFeasibleQ", prettyState(state), action, q);
+      if (verbose || debug) console.log(pad(state),"| | | minFeasibleQ, state",prettyState(state),"action",action,":",q);
       return q;
     });
     // ! recursive function:
     var minFeasibleV = dp.cache(function(state){
+      if (verbose || debug) console.log(pad(state),"| | | minFeasibleV, state",prettyState(state),"...");
       var actions = stateToActions(state);
       var qs = map(function(action) { return minFeasibleQ(state, action); }, actions),  // ! recursion here !
           v = minLambda == 0 
               ? _W.min(qs)
               : interpolate(_W.min(qs), minLambda, _W.max(qs));
-      if (debug) console.log("   minFeasibleV", prettyState(state), qs, v);
+      if (verbose || debug) console.log(pad(state),"| | | minFeasibleV, state",prettyState(state),":",v);
       return v;
     });
 
@@ -323,8 +342,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // Therefore, when in state at incoming aspiration aleph, 
     // we adjust our aspiration to aleph clipped to that interval:
     var aspiration4state = dp.cache(function(state, unclippedAleph){
+      if (verbose || debug) console.log(pad(state),"| | aspiration4state, state",prettyState(state),"unclippedAleph",unclippedAleph,"...");
       var res = clip(minFeasibleV(state), asInterval(unclippedAleph), maxFeasibleV(state));
-      if (debug) console.log("  aspiration4state", prettyState(state), unclippedAleph, res);
+      if (verbose || debug) console.log(pad(state),"| | aspiration4state, state",prettyState(state),"unclippedAleph",unclippedAleph,":",res);
       return res;
     });
   
@@ -332,9 +352,13 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // that does not depend on the local policy but is simply based on the state's aspiration interval,
     // rescaled from the feasibility interval of the state to the feasibility interval of the action.
     var estAspiration4action = dp.cache(function(state, action, aleph4state){
+      if (/*verbose ||*/ debug) console.log("| | estAspiration4action, state",prettyState(state),"action",action,"aleph4state",aleph4state,"...");
       var phi = feasibility4action(state, action);
       if (isSubsetOf(phi, aleph4state)) {
+
+        if (verbose || debug) console.log(pad(state),"| | estAspiration4action, state",prettyState(state),"action",action,"aleph4state",aleph4state,":",phi,"(subset of aleph4state)");
         return phi;
+
       } else {
         // if rescaling4Actions == 1, we use a completely rescaled version:
         var rescaled = interpolate(minFeasibleQ(state, action), 
@@ -354,7 +378,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         // We interpolate between the two versions according to rescaling4Actions:
         var res = interpolate(steadfast, rescaling4Actions, rescaled);
 
-        if (debug) console.log("  estAspiration4action", prettyState(state), action, aleph4state, rescaled, steadfast, res);
+        if (verbose || debug) console.log(pad(state),"| | estAspiration4action, state",prettyState(state),"action",action,"aleph4state",aleph4state,":",res,"(steadfast/rescaled)");
         return res;
       }
     });
@@ -385,7 +409,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       return Categorical({vs: support, ps: ps});
     }
     var localPolicyData = dp.cache(function(state, aleph){
-      if (debug) console.log(" localPolicyData", prettyState(state), aleph);
+      if (verbose || debug) console.log(pad(state),"| localPolicy, state",prettyState(state),"aleph",aleph,"...");
       
       // Clip aspiration interval to feasibility interval of state:
       var aleph4state = aspiration4state(state, aleph),
@@ -408,7 +432,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
             return Math.min(1e100, Math.max(Math.exp(-loss / lossTemperature), 1e-100)); 
           }, indices);
 
-      if (debug) console.log("  localPolicyData", prettyState(state), aleph, actions, {propensities});
+      if (debug) console.log("| localPolicyData", prettyState(state), aleph, actions, {propensities});
 
       // now we can construct the local policy as a WebPPL distribution object:
       var locPol = Infer({ model() {
@@ -420,7 +444,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
             phi1 = feasibility4action(state, a1),
             phi1Lo = phi1[0], phi1Hi = phi1[1];
 
-        if (debug) console.log("  localPolicyData", prettyState(state), aleph4state, {a1, phi1});
+        if (debug) console.log("| localPolicyData", prettyState(state), aleph4state, {a1, phi1});
 
         // If a1's feasibility interval is completely contained in aleph4state, we are done:
         if (isSubsetOf(phi1, aleph4state)) {
@@ -450,7 +474,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                 return Math.min(1e100, Math.max(Math.exp(-loss / lossTemperature), 1e-100)); 
               }, indices2);
 
-          if (debug) console.log("  localPolicyData", prettyState(state), aleph4state, {a1, midTarget, estAleph1, mid1, indices2, aleph2target, estAlephs2, propensities2});
+          if (debug) console.log("| localPolicyData", prettyState(state), aleph4state, {a1, midTarget, estAleph1, mid1, indices2, aleph2target, estAlephs2, propensities2});
 
           // Like for a1, we now draw a2 using a softmin mixture of these actions, based on the new propentities,
           // and get its feasibility interval:
@@ -483,7 +507,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
               aleph1 = [mid1 - x * w1, mid1 + x * w1],
               aleph2 = [mid2 - x * w2, mid2 + x * w2];
                 
-          if (debug) console.log("  localPolicyData",prettyState(state), aleph4state, {a1, estAleph1, phi1, w1, a2, estAleph2, phi2, w2, p, w, x, aleph1, aleph2});
+          if (debug) console.log("| localPolicyData",prettyState(state), aleph4state, {a1, estAleph1, phi1, w1, a2, estAleph2, phi2, w2, p, w, x, aleph1, aleph2});
 
           return sample(Categorical({vs: [[a1, aleph1], [a2, aleph2]], ps: [1-p, p]}));
 
@@ -508,7 +532,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
               phi2 = feasibility4action(state, a2),
               phi2Lo = phi2[0], phi2Hi = phi2[1];
 
-          if (debug) console.log("   ", prettyState(state), aleph, indices2, a2, phi2, phi2Lo, phi2Hi);
+          if (debug) console.log("|  ", prettyState(state), aleph, indices2, a2, phi2, phi2Lo, phi2Hi);
 
           // If a2's feasibility interval is completely contained in aleph4state, we are done:
           if (isSubsetOf(phi2, aleph4state)) {
@@ -548,7 +572,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                   aleph1 = [target1Lo + devLo * wsq1, target1Hi + devHi * wsq1],
                   aleph2 = [target2Lo + devLo * wsq2, target2Hi + devHi * wsq2];
                   
-              if (debug) console.log("   ",prettyState(state), aleph4state,
+              if (debug) console.log("|  ",prettyState(state), aleph4state,
                 "\n    ", a1, estAleph1, phi1, wsq1, d1Lo, d1Hi, 
                 "\n    ", a2, estAleph2, phi2, wsq2, d2Lo, d2Hi, 
                 "\n    ", facLo, facHi, p, wsq, devLo, devHi, 
@@ -569,6 +593,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                     return Math.max(1e-100, Math.exp(locPol.score(item)));  // 1e-100 prevents normalization problems
                   }, support);
 
+      if (verbose || debug) console.log(pad(state),"| localPolicy, state",prettyState(state),"aleph",aleph,":",[support, ps]);
       return [support, ps];
 
     });
@@ -578,7 +603,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var propagateAspiration = // dp.cache(  // caching this easy to compute function would only clutter the cache due to its many arguments
       function(state, action, aleph4action, Edel, nextState){  
 
-        if (debug) console.log(" propagateAspiration", prettyState(state), action, aleph4action, Edel, prettyState(nextState));
+        if (/*verbose ||*/ debug) console.log(pad(state),"| | | propagateAspiration, state",prettyState(state),"action",action,"aleph4action",aleph4action,"Edel",Edel,"nextState",prettyState(nextState),"...");
 
         // the propagated aspiration is a mixture of a steadfast and a rescaled part:
     
@@ -587,7 +612,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         if (rescaling4Successors == 0.0) {
 
           var res = steadfastAleph4nextState;
-          if (debug) console.log(" propagateAspiration", prettyState(state), action, aleph4action, Edel, prettyState(nextState), res);
+          if (verbose || debug) console.log(pad(state),"| | | propagateAspiration, state",prettyState(state),"action",action,"aleph4action",aleph4action,"Edel",Edel,"nextState",prettyState(nextState),":",res);
           return res;
 
         } else {
@@ -601,7 +626,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           var rescaledAleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
           // (only this part preserves aspiration in expectation)
           var res = interpolate(steadfastAleph4nextState, rescaling4Successors, rescaledAleph4nextState);      
-          if (debug) console.log(" propagateAspiration", prettyState(state), action, aleph4action, Edel, prettyState(nextState), res);
+          if (verbose || debug) console.log(pad(state),"| | | propagateAspiration, state",prettyState(state),"action",action,"aleph4action",aleph4action,"Edel",Edel,"nextState",prettyState(nextState),":",res);
           return res;
 
           /* Note on influence of Edel: 
@@ -643,7 +668,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // Actual Q and V functions of resulting policy (always returning scalars):
     // ! recursive function:
     var Q = dp.cache(function(state, action, aleph4action){
-      if (debug) console.log("  Q", prettyState(state), action, aleph4action);
+      if (debug) console.log("| Q", prettyState(state), action, aleph4action);
       var q = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action);
         if (state.terminateAfterAction){
@@ -654,18 +679,18 @@ var makeMDPAgentSatisfia = function(params_, world) {
           return Edel + V(nextState, nextAleph4state);  // ! recursion here !
         }
       }})); 
-      if (debug) console.log("  Q", prettyState(state), action, aleph4action, q);
+      if (debug) console.log("| Q", prettyState(state), action, aleph4action, q);
       return q;
     });
     // ! recursive function:
     var V = dp.cache(function(state, aleph4state){
-      if (debug) console.log("  V", prettyState(state), aleph4state);
+      if (debug) console.log("| V", prettyState(state), aleph4state);
       var locPol = localPolicy(state, aleph4state);
       var v = expectation(Infer({ model() {
         var actionAndAleph = sample(locPol);  // ! recursion here !
         return Q(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
       }}));
-      if (debug) console.log("  V", prettyState(state), aleph4state, ":", v);
+      if (debug) console.log("| V", prettyState(state), aleph4state, ":", v);
       return v;
     });
   
@@ -723,7 +748,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                  + V2(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
-      if (debug) console.log("  Q2", prettyState(state), action, aleph4action, q2);
+      if (debug) console.log("| Q2", prettyState(state), action, aleph4action, q2);
       return q2;
     });
     // ! recursive function:
@@ -733,7 +758,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var actionAndAleph = sample(locPol);  // ! recursion here !
         return Q2(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
       }}));
-      if (debug) console.log("  V2", prettyState(state), aleph4state, v2);
+      if (debug) console.log("| V2", prettyState(state), aleph4state, v2);
       return v2;
     });
   
@@ -756,7 +781,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                  + V3(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
-      if (debug) console.log("  Q3", prettyState(state), action, aleph4action, q3);
+      if (debug) console.log("| Q3", prettyState(state), action, aleph4action, q3);
       return q3;
     });
     // ! recursive function:
@@ -766,7 +791,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var actionAndAleph = sample(locPol);  // ! recursion here !
         return Q3(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
       }}));
-      if (debug) console.log("  V3", prettyState(state), aleph4state, v3);
+      if (debug) console.log("| V3", prettyState(state), aleph4state, v3);
       return v3;
     });
   
@@ -791,7 +816,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                  + V4(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
-      if (debug) console.log("  Q4", prettyState(state), action, aleph4action, q4);
+      if (debug) console.log("| Q4", prettyState(state), action, aleph4action, q4);
       return q4;
     });
     // ! recursive function:
@@ -801,7 +826,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var actionAndAleph = sample(locPol);  // ! recursion here !
         return Q4(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
       }}));
-      if (debug) console.log("  V4", prettyState(state), aleph4state, v4);
+      if (debug) console.log("| V4", prettyState(state), aleph4state, v4);
       return v4;
     });
   
@@ -828,7 +853,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                  + V5(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
-      if (debug) console.log("  Q5", prettyState(state), action, aleph4action, q5);
+      if (debug) console.log("| Q5", prettyState(state), action, aleph4action, q5);
       return q5;
     });
     // ! recursive function:
@@ -838,7 +863,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var actionAndAleph = sample(locPol);  // ! recursion here !
         return Q5(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
       }}));
-      if (debug) console.log("  V5", prettyState(state), aleph4state, v5);
+      if (debug) console.log("| V5", prettyState(state), aleph4state, v5);
       return v5;
     });
     
@@ -867,7 +892,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                  + V6(nextState, nextAleph4state); // ! recursion here !
         }
       }}));
-      if (debug) console.log("  Q6", prettyState(state), action, aleph4action, q6);
+      if (debug) console.log("| Q6", prettyState(state), action, aleph4action, q6);
       return q6;
     });
     // ! recursive function:
@@ -877,7 +902,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var actionAndAleph = sample(locPol);  // ! recursion here !
         return Q6(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
       }}));
-      if (debug) console.log("  V6", prettyState(state), aleph4state, v6);
+      if (debug) console.log("| V6", prettyState(state), aleph4state, v6);
       return v6;
     });
 
@@ -898,7 +923,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var res = Q2(s,a,al) 
                   - 2*Q(s,a,al)*v 
                   + squared(v);
-        if (debug) console.log("  Q2v", prettyState(s), a, al, v, res);
+        if (debug) console.log("| Q2v", prettyState(s), a, al, v, res);
         return res;
     });
     /*
@@ -946,7 +971,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           return EdelSq + V_DeltaSquare(nextState, nextAleph4state);  // ! recursion here !
         }
       }}));
-      if (debug) console.log("  Q_DeltaSquare", prettyState(state), action, aleph4action, qDsq);
+      if (debug) console.log("| Q_DeltaSquare", prettyState(state), action, aleph4action, qDsq);
       return qDsq;
     });
     // ! recursive function:
@@ -956,7 +981,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var actionAndAleph = sample(locPol);  // ! recursion here !
         return Q_DeltaSquare(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
       }}));
-      if (debug) console.log("  V_DeltaSquare", prettyState(state), aleph4state, vDsq);
+      if (debug) console.log("| V_DeltaSquare", prettyState(state), aleph4state, vDsq);
       return vDsq;
     });
   
@@ -974,7 +999,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           return 1 + V_ones(nextState, nextAleph4state);  // ! recursion here !
         }
       }}));
-      if (debug) console.log("  Q_ones", prettyState(state), action, aleph4action, q_ones);
+      if (debug) console.log("| Q_ones", prettyState(state), action, aleph4action, q_ones);
       return q_ones;
     });
     // ! recursive function:
@@ -984,7 +1009,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var actionAndAleph = sample(locPol);  // ! recursion here !
         return Q_ones(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
       }}));
-      if (debug) console.log("  V_ones", prettyState(state), aleph4state, v_ones);
+      if (debug) console.log("| V_ones", prettyState(state), aleph4state, v_ones);
       return v_ones;
     });
 
@@ -1114,7 +1139,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
     var cupLoss_action = dp.cache(function(state, action, aleph4state, aleph4action){
       var res = Q6v(state, action, aleph4action, midpoint(aleph4state));
-      if (debug) console.log("  cupLoss_action", prettyState(state), action, aleph4state, res);
+      if (debug) console.log("| cupLoss_action", prettyState(state), action, aleph4state, res);
       return res;
     });
     // recursive function:
@@ -1162,6 +1187,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var combinedLoss = dp.cache(function(s /*state*/, a /*action*/, 
                                          al4s /*aleph4state*/, al4a /*aleph4action*/, 
                                          p /*estActionProbability*/) { 
+      if (verbose || debug) console.log(pad(s),"| | combinedLoss, state",prettyState(s),"action",a,"aleph4state",al4s,"aleph4action",al4a,"estActionProbability",p,"...");
       var q_ones = (lossCoeff4DeltaVariation != 0 || lossCoeff4Time != 0) ? Q_ones(s, a, al4a) : undefined;
       // To compute expected powers of deviation from V(s), we cannot use the actual V(s) 
       // because we don't know the local policy at s yet. Hence we use a simple estimate based on aleph4state:
@@ -1181,7 +1207,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           lOther = otherLocalLoss && (lossCoeff4OtherLoss != 0) ? lossCoeff4otherLoss * otherLoss_action(s, a, al4a) : 0,
           lRandom = lossCoeff4Random != 0 ? lossCoeff4Random * randomTieBreaker(s, a) : 0,
           res = lCup + lVariance + lFourth + lDeltaVariation + lLRA + lMP + lKLdiv + lEntropy + lFeasibilityPower + lTime + lOther + lRandom;
-      if (debug) console.log("  combinedLoss", prettyState(s), a, al4s, al4a, p, {lCup, lVariance, lFourth, lDeltaVariation, lLRA, lMP, lKLdiv, lEntropy, lFeasibilityPower, lTime, lOther, lRandom}, res);
+      if (verbose || debug) console.log(pad(s),"| | combinedLoss, state",prettyState(s),"action",a,"aleph4state",al4s,"aleph4action",al4a,"estActionProbability",p,":",res,"\n"+pad(s),"| |  ",JSON.stringify({lCup, lVariance, lFourth, lDeltaVariation, lLRA, lMP, lKLdiv, lEntropy, lFeasibilityPower, lTime, lOther, lRandom}));
       return res;
     });
 

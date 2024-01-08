@@ -34,21 +34,24 @@ var env = getEnv(),
 var simulate = function(state, aleph, _t) {
   var t = _t ? _t : 0,
       aleph4state = asInterval(aleph);
-  if (options.debug) console.log("simulate", prettyState(state), aleph4state, t);
+  if (options.verbose || options.debug) console.log("\nSIMULATE, t",t,"state",prettyState(state),"aleph4state",aleph4state,"...");
   var localPolicy = localPolicy(state, aleph4state),
       actionAndAleph = sample(localPolicy),
-      action = actionAndAleph[0], aleph4action = actionAndAleph[1],
+      action = actionAndAleph[0], 
+      aleph4action = actionAndAleph[1],
       Edel = expectedDelta(state, action);
   var stepData = {state, aleph4state, action, aleph4action, Edel};
   if (state.terminateAfterAction) {
+    if (options.verbose || options.debug) console.log("SIMULATE, t",t,"state",prettyState(state),"aleph4state",aleph4state,": localPolicy",localPolicy,"action",action,"aleph4action",aleph4action,"Edel",Edel,"(terminal)");
     return { 
       trajectory: [stepData], // sequence of [state, action] pairs
       conditionalExpectedIndicator: Edel // expected indicator conditional on this trajectory
     };
   } else {
     var nextState = transition(state, action),
-        nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState),
-        nextOut = simulate(nextState, nextAleph4state, t+1);
+        nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
+    if (options.verbose || options.debug) console.log("SIMULATE, t",t,"state",prettyState(state),"aleph4state",aleph4state,": localPolicy",localPolicy,"action",action,"aleph4action",aleph4action,"Edel",Edel,"nextState",prettyState(nextState),"nextAleph4state",nextAleph4state);
+    var nextOut = simulate(nextState, nextAleph4state, t+1);
     return { 
       trajectory: [stepData].concat(nextOut.trajectory), 
       conditionalExpectedIndicator: Edel + nextOut.conditionalExpectedIndicator

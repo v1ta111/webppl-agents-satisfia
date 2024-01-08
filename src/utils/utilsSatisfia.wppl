@@ -1,7 +1,8 @@
 // pretty-printing:
 
-var prettyState = function (x) { return "(" + x.loc[0] + "," + x.loc[1] + ")-" + x.timeLeft; };
+var prettyState = function (state) { return "(" + state.loc[0] + "," + state.loc[1] + ")-" + state.timeLeft; };
 
+var pad = function(state) { return " :    ".repeat(Math.max(0, 10 - state.timeLeft)); }
 
 // math:
 
