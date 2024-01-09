@@ -147,24 +147,32 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
     // extend default parameters and options by supplied ones:
     var params = extend(extend({
+      // feasibility parameters:
       maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)
       minLambda: 0, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
-      lossCoeff4Variance: 1, // weight of variance of total in loss function, must be >= 0
-      lossCoeff4Fourth: 0, // weight of centralized fourth moment of total in loss function, must be >= 0
-      lossCoeff4Cup: 0, // weight of "cup" loss component, based on sixth moment of total, must be >= 0
-      lossCoeff4DeltaVariation: 0, // weight of variation of Delta in loss function, must be >= 0
-      lossCoeff4LRA: 0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
-      lossCoeff4MP: 0, // weight of messing potential in loss function, must be >= 0
-      lossCoeff4Entropy: 0, // weight of entropy in loss function, must be >= 0
-      lossCoeff4KLdiv: 0, // weight of KL divergence in loss function, must be >= 0
-      lossCoeff4FeasibilityPower: 0, // weight of power of squared feasibility interval width in loss function, must be >= 0
-      lossCoeff4Time: 0, // weight of time in loss function, must be >= 0
-      lossCoeff4OtherLoss: 0, // weight of other loss components specified by otherLossIncrement, must be >= 0
-      lossCoeff4Random: 0, // weight of random tie breaker in loss function, must be >= 0
-      allowNegativeCoeffs: false, // if true, allow negative loss coefficients
+      // policy parameters:
       lossTemperature: 0.1, // temperature of softmin mixture of actions w.r.t. loss, must be > 0
       rescaling4Actions: 0, // degree (0...1) of aspiration rescaling from state to action. (larger implies larger variance)
       rescaling4Successors: 1, // degree (0...1) of aspiration rescaling from action to successor state. (expectation is only preserved if this is 1.0)
+      // coefficients for cheap to compute loss functions:
+      lossCoeff4Random: 0, // weight of random tie breaker in loss function, must be >= 0
+      lossCoeff4FeasibilityPower: 1, // weight of power of squared feasibility interval width in loss function, must be >= 0
+      lossCoeff4MP: 1, // weight of messing potential in loss function, must be >= 0
+      lossCoeff4LRA1: 1, // weight of current-state deviation of LRA from 0.5 in loss function, must be >= 0
+      lossCoeff4Time1: 1, // weight of not terminating in loss function, must be >= 0
+      lossCoeff4Entropy1: 1, // weight of current-state action entropy in loss function, must be >= 0
+      lossCoeff4KLdiv1: 1, // weight of current-state KL divergence in loss function, must be >= 0
+      // coefficients for expensive to compute loss functions (all zero by default except for variance):
+      lossCoeff4Variance: 1, // weight of variance of total in loss function, must be >= 0
+      lossCoeff4Fourth: 0, // weight of centralized fourth moment of total in loss function, must be >= 0
+      lossCoeff4Cup: 0, // weight of "cup" loss component, based on sixth moment of total, must be >= 0
+      lossCoeff4LRA: 0, // weight of deviation of LRA from 0.5 in loss function, must be >= 0
+      lossCoeff4Time: 0, // weight of time in loss function, must be >= 0
+      lossCoeff4DeltaVariation: 0, // weight of variation of Delta in loss function, must be >= 0
+      lossCoeff4Entropy: 0, // weight of action entropy in loss function, must be >= 0
+      lossCoeff4KLdiv: 0, // weight of KL divergence in loss function, must be >= 0
+      lossCoeff4OtherLoss: 0, // weight of other loss components specified by otherLossIncrement, must be >= 0
+      allowNegativeCoeffs: false, // if true, allow negative loss coefficients
     }, params_), { options: extend({
       verbose: false,  // if true, print explanatory messages
       debug: false  // if true, print extensive debugging messages
@@ -190,47 +198,55 @@ var makeMDPAgentSatisfia = function(params_, world) {
           },  // function(state, action)
         minLambda = params.minLambda, 
         maxLambda = params.maxLambda,
-        uninformedStatePriorScore = params.uninformedStatePriorScore,
-        uninformedPolicy = params.uninformedPolicy,  // function(state)
-        referencePolicy = params.referencePolicy,  // function(state)
-        internalActionEntropy = params.internalActionEntropy,  // function(state, action)
-        internalTransitionEntropy = params.internalTransitionEntropy,  // function(state, action, nextState)
-        otherLocalLoss = params.otherLossIncrement,  // function(state, action, aleph, v, q, p)
-        lossCoeff4Cup = params.lossCoeff4Cup,
-        lossCoeff4Variance = params.lossCoeff4Variance,
-        lossCoeff4Fourth = params.lossCoeff4Fourth,
-        lossCoeff4DeltaVariation = params.lossCoeff4DeltaVariation,
-        lossCoeff4LRA = params.lossCoeff4LRA,
-        lossCoeff4MP = params.lossCoeff4MP,
-        lossCoeff4Entropy = params.lossCoeff4Entropy,
-        lossCoeff4KLdiv = params.lossCoeff4KLdiv,
-        lossCoeff4FeasibilityPower = params.lossCoeff4FeasibilityPower,
-        lossCoeff4Time = params.lossCoeff4Time,
-        lossCoeff4OtherLoss = params.lossCoeff4OtherLoss,
-        lossCoeff4Random = params.lossCoeff4Random,
-        allowNegativeCoeffs = params.allowNegativeCoeffs,
         lossTemperature = params.lossTemperature,
         rescaling4Actions = params.rescaling4Actions,
-        rescaling4Successors = params.rescaling4Successors;
+        rescaling4Successors = params.rescaling4Successors,
+        lossCoeff4Random = params.lossCoeff4Random,
+        lossCoeff4FeasibilityPower = params.lossCoeff4FeasibilityPower,
+        lossCoeff4MP = params.lossCoeff4MP,
+        uninformedStatePriorScore = params.uninformedStatePriorScore,  // function(state) used in messingPotential
+        internalTransitionEntropy = params.internalTransitionEntropy,  // function(state, action, nextState) used in messingPotential
+        lossCoeff4LRA1 = params.lossCoeff4LRA1,
+        lossCoeff4Time1 = params.lossCoeff4Time1,
+        lossCoeff4Entropy1 = params.lossCoeff4Entropy1,
+        lossCoeff4KLdiv1 = params.lossCoeff4KLdiv1,
+        lossCoeff4Variance = params.lossCoeff4Variance,
+        lossCoeff4Fourth = params.lossCoeff4Fourth,
+        lossCoeff4Cup = params.lossCoeff4Cup,
+        lossCoeff4LRA = params.lossCoeff4LRA,
+        lossCoeff4Time = params.lossCoeff4Time,
+        lossCoeff4DeltaVariation = params.lossCoeff4DeltaVariation,
+        lossCoeff4Entropy = params.lossCoeff4Entropy,
+        uninformedPolicy = params.uninformedPolicy,  // function(state) used in entropy
+        internalActionEntropy = params.internalActionEntropy,  // function(state, action) used in entropy
+        lossCoeff4KLdiv = params.lossCoeff4KLdiv,
+        referencePolicy = params.referencePolicy,  // function(state) used in KLdiv
+        lossCoeff4OtherLoss = params.lossCoeff4OtherLoss,
+        otherLocalLoss = params.otherLossIncrement,  // function(state, action, aleph, v, q, p)
+        allowNegativeCoeffs = params.allowNegativeCoeffs;
     var options = params.options,
         verbose = options.verbose, 
         debug = options.debug;
   
-    assert.ok(allowNegativeCoeffs || lossCoeff4Cup >= 0, "lossCoeff4Cup must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4Variance >= 0, "lossCoeff4variance must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4Fourth >= 0, "lossCoeff4Fourth must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4LRA >= 0, "lossCoeff4LRA must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4Entropy >= 0, "lossCoeff4entropy must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4KLdiv >= 0, "lossCoeff4KLdiv must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4FeasibilityPower >= 0, "lossCoeff4FeasibilityPower must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4Time >= 0, "lossCoeff4time must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4OtherLoss >= 0, "lossCoeff4OtherLoss must be >= 0");
-    assert.ok(allowNegativeCoeffs || lossCoeff4Random >= 0, "lossCoeff4random must be >= 0");
     assert.ok(lossTemperature > 0, "lossTemperature must be > 0");
     assert.ok(0 <= rescaling4Actions <= 1, "rescaling4Actions must be in 0...1");
     assert.ok(0 <= rescaling4Successors <= 1, "rescaling4Successors must be in 0...1");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Random >= 0, "lossCoeff4random must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4FeasibilityPower >= 0, "lossCoeff4FeasibilityPower must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4LRA1 >= 0, "lossCoeff4LRA1 must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Time1 >= 0, "lossCoeff4Time1 must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Entropy1 >= 0, "lossCoeff4Entropy1 must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4KLdiv1 >= 0, "lossCoeff4KLdiv1 must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Variance >= 0, "lossCoeff4variance must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Fourth >= 0, "lossCoeff4Fourth must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Cup >= 0, "lossCoeff4Cup must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4LRA >= 0, "lossCoeff4LRA must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Time >= 0, "lossCoeff4time must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4DeltaVariation >= 0, "lossCoeff4DeltaVariation must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4Entropy >= 0, "lossCoeff4entropy must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4KLdiv >= 0, "lossCoeff4KLdiv must be >= 0");
+    assert.ok(allowNegativeCoeffs || lossCoeff4OtherLoss >= 0, "lossCoeff4OtherLoss must be >= 0");
     assert.ok(lossCoeff4Entropy == 0 || lossCoeff4MP == 0 || uninformedPolicy != undefined, "uninformedPolicy must be provided if lossCoeff4MP > 0 or lossCoeff4Entropy > 0");
   
     if (verbose || debug) console.log("makeMDPAgentSatisfia with parameters", params);
@@ -424,9 +440,6 @@ var makeMDPAgentSatisfia = function(params_, world) {
           MP = Math.log(sum(maxMPpolicyWeights));
       return MP;
     });
-
-    // TODO: add further myopic (i.e., one-step) safety metrics here, e.g. myopic versions of 
-    // LRAdev, behaviorEntropy, behaviorKLdiv, cupLoss, variance, fourthMoment, DeltaVariation, time.
 
 
     // Based on the feasibility information computed above, we can now construct the policy,
@@ -987,44 +1000,63 @@ var makeMDPAgentSatisfia = function(params_, world) {
                + Math.pow(v,6);
     });
     
-    // TODO: verify the following two formulas for expected Delta variation along a trajectory:
+    // TODO: the following should maybe better be w.r.t. the initial aspiration interval, not the current state's:
 
-    // Expected total of squared Deltas, for computing the expected Delta variation along a trajectory:
-    // ! recursive function:
-    var Q_DeltaSquare = dp.cache(function(state, action, aleph4action){
-      // Note for ANN approximation: Q_DeltaSquare must be nonnegative. 
-      var qDsq = expectation(Infer({ model() {
-        var Edel = expectedDelta(state, action),
-            EdelSq = squared(Edel) + varianceOfDelta(state, action);
-        if (state.terminateAfterAction){
-          return EdelSq;
-        } else {
-          var nextState = transition(state, action),
-              nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
-          return EdelSq + V_DeltaSquare(nextState, nextAleph4state);  // ! recursion here !
-        }
-      }}));
-      if (debug) console.log("| Q_DeltaSquare", prettyState(state), action, aleph4action, qDsq);
-      return qDsq;
+    // loss based on a "cup" shaped potential centered at the mid-point of the aspiration interval
+    // that is almost completely flat in the middle half of the interval 
+    // (https://www.wolframalpha.com/input?i=plot+%28x-.5%29%5E6+from+0+to+1):
+
+    var cupLoss_action = dp.cache(function(state, action, aleph4state, aleph4action){
+      var res = Q6v(state, action, aleph4action, midpoint(aleph4state));
+      if (debug) console.log("| cupLoss_action", prettyState(state), action, aleph4state, res);
+      return res;
     });
-    // ! recursive function:
-    var V_DeltaSquare = dp.cache(function(state, aleph4state){
+    // recursive function:
+    var cupLoss_state = dp.cache(function(state, unclippedAleph){
+      var aleph4state = aspiration4state(state, unclippedAleph),
+          locPol = localPolicy(state, aleph4state); // ! recursion here !
+      return expectation(Infer({ model() {
+        var actionAndAleph = sample(locPol);
+        return cupLoss_action(state, actionAndAleph[0], aleph4state, actionAndAleph[1]);
+      }
+      }));
+    });
+
+    // Squared deviation of local relative aspiration (midpoint of interval) from 0.5:
+    // recursive function:
+    var LRAdev_action = dp.cache(function(state, action, aleph4action, myopic) {
+      // Note for ANN approximation: LRAdev_action must be between 0 and 0.25 
+      var Edel = expectedDelta(state, action),
+          res = expectation(Infer({ model() {
+            var localLRAdev = squared(0.5 - relativePosition(minFeasibleQ(state, action), midpoint(aleph4action), maxFeasibleQ(state, action)));
+            if (state.terminateAfterAction || myopic){
+              return localLRAdev;
+            } else {
+              var nextState = transition(state, action),
+                  nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
+              return localLRAdev + LRAdev_state(nextState, nextAleph4state); // ! recursion here !
+            }
+          }}));
+      return res;
+    });
+    // recursive function:
+    var LRAdev_state = dp.cache(function(state, aleph4state) {
       var locPol = localPolicy(state, aleph4state);
-      var vDsq = expectation(Infer({ model() { 
+      return expectation(Infer({ model() { 
         var actionAndAleph = sample(locPol);  // ! recursion here !
-        return Q_DeltaSquare(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
+        return LRAdev_action(state, actionAndAleph[0], actionAndAleph[1]); // ! recursion here !
       }}));
-      if (debug) console.log("| V_DeltaSquare", prettyState(state), aleph4state, vDsq);
-      return vDsq;
     });
   
+    // TODO: verify the following two formulas for expected Delta variation along a trajectory:
+
     // Expected total of ones (= expected length of trajectory), for computing the expected Delta variation along a trajectory:
     // ! recursive function:
     var Q_ones = dp.cache(function(state, action, aleph4action){
       // Note for ANN approximation: Q_ones must be nonnegative. 
       var q_ones = expectation(Infer({ model() {
         var Edel = expectedDelta(state, action);
-        if (state.terminateAfterAction){
+        if (state.terminateAfterAction || aleph4action === undefined){
           return 1;
         } else {
           var nextState = transition(state, action),
@@ -1046,33 +1078,36 @@ var makeMDPAgentSatisfia = function(params_, world) {
       return v_ones;
     });
 
-    // Other safety criteria:
-  
-    // Squared deviation of local relative aspiration (midpoint of interval) from 0.5:
-    // recursive function:
-    var LRAdev_action = dp.cache(function(state, action, aleph4action) {
-      // Note for ANN approximation: LRAdev_action must be between 0 and 0.25 
-      var Edel = expectedDelta(state, action),
-          res = expectation(Infer({ model() {
-            var localLRAdev = squared(0.5 - relativePosition(minFeasibleQ(state, action), midpoint(aleph4action), maxFeasibleQ(state, action)));
-            if (state.terminateAfterAction){
-              return localLRAdev;
-            } else {
-              var nextState = transition(state, action),
-                  nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
-              return localLRAdev + LRAdev_state(nextState, nextAleph4state); // ! recursion here !
-            }
-          }}));
-      return res;
-    });
-    // recursive function:
-    var LRAdev_state = dp.cache(function(state, aleph4state) {
-      var locPol = localPolicy(state, aleph4state);
-      return expectation(Infer({ model() { 
-        var actionAndAleph = sample(locPol);  // ! recursion here !
-        return LRAdev_action(state, actionAndAleph[0], actionAndAleph[1]); // ! recursion here !
+    // Expected total of squared Deltas, for computing the expected Delta variation along a trajectory:
+    // ! recursive function:
+    var Q_DeltaSquare = dp.cache(function(state, action, aleph4action){
+      // Note for ANN approximation: Q_DeltaSquare must be nonnegative. 
+      var qDsq = expectation(Infer({ model() {
+        var Edel = expectedDelta(state, action),
+            EdelSq = squared(Edel) + varianceOfDelta(state, action);
+        if (state.terminateAfterAction || aleph4action === undefined){
+          return EdelSq;
+        } else {
+          var nextState = transition(state, action),
+              nextAleph4state = propagateAspiration(state, action, aleph4action, Edel, nextState);
+          return EdelSq + V_DeltaSquare(nextState, nextAleph4state);  // ! recursion here !
+        }
       }}));
+      if (debug) console.log("| Q_DeltaSquare", prettyState(state), action, aleph4action, qDsq);
+      return qDsq;
     });
+    // ! recursive function:
+    var V_DeltaSquare = dp.cache(function(state, aleph4state){
+      var locPol = localPolicy(state, aleph4state);
+      var vDsq = expectation(Infer({ model() { 
+        var actionAndAleph = sample(locPol);  // ! recursion here !
+        return Q_DeltaSquare(state, actionAndAleph[0], actionAndAleph[1]);  // ! recursion here !
+      }}));
+      if (debug) console.log("| V_DeltaSquare", prettyState(state), aleph4state, vDsq);
+      return vDsq;
+    });
+  
+    // Other safety criteria:
   
     // Shannon entropy of behavior
     // (actually, negative KL divergence relative to uninformedPolicy (e.g., a uniform distribution),
@@ -1087,7 +1122,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                 localEntropy = (uninfPol ? uninfPol.score(action) : 0) 
                     - Math.log(actionProbability)
                     + (internalActionEntropy ? internalActionEntropy(state, action) : 0);
-            if (state.terminateAfterAction){
+            if (state.terminateAfterAction || aleph4action === undefined){
               return localEntropy;
             } else {
               var nextState = transition(state, action),
@@ -1116,7 +1151,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var Edel = expectedDelta(state, action),
             res = expectation(Infer({ model() {
             var localDivergence = Math.log(actionProbability) - refPol.score(action);
-            if (state.terminateAfterAction){
+            if (state.terminateAfterAction || aleph4action === undefined){
               return localDivergence;
             } else {
               var nextState = transition(state, action),
@@ -1138,35 +1173,13 @@ var makeMDPAgentSatisfia = function(params_, world) {
       }}));
     });
   
-    // TODO: the following should maybe better be w.r.t. the initial aspiration interval, not the current state's:
-
-    // loss based on a "cup" shaped potential centered at the mid-point of the aspiration interval
-    // that is almost completely flat in the middle half of the interval 
-    // (https://www.wolframalpha.com/input?i=plot+%28x-.5%29%5E6+from+0+to+1):
-
-    var cupLoss_action = dp.cache(function(state, action, aleph4state, aleph4action){
-      var res = Q6v(state, action, aleph4action, midpoint(aleph4state));
-      if (debug) console.log("| cupLoss_action", prettyState(state), action, aleph4state, res);
-      return res;
-    });
-    // recursive function:
-    var cupLoss_state = dp.cache(function(state, unclippedAleph){
-      var aleph4state = aspiration4state(state, unclippedAleph),
-          locPol = localPolicy(state, aleph4state); // ! recursion here !
-      return expectation(Infer({ model() {
-        var actionAndAleph = sample(locPol);
-        return cupLoss_action(state, actionAndAleph[0], aleph4state, actionAndAleph[1]);
-      }
-      }));
-    });
-
     // other loss:
     // recursive function:
     var otherLoss_action = dp.cache(function(state, action, aleph4action) {
       var Edel = expectedDelta(state, action),
           loss = expectation(Infer({ model() {
             var localLoss = otherLocalLoss(state, action);
-            if (state.terminateAfterAction){
+            if (state.terminateAfterAction || aleph4action === undefined){
               return localLoss;
             } else {
               var nextState = transition(state, action),
@@ -1195,26 +1208,48 @@ var makeMDPAgentSatisfia = function(params_, world) {
                                          al4s /*aleph4state*/, al4a /*aleph4action*/, 
                                          p /*estActionProbability*/) { 
       if (verbose || debug) console.log(pad(s),"| | combinedLoss, state",prettyState(s),"action",a,"aleph4state",al4s,"aleph4action",al4a,"estActionProbability",p,"...");
-      var q_ones = (lossCoeff4DeltaVariation != 0 || lossCoeff4Time != 0) ? Q_ones(s, a, al4a) : undefined;
-      // To compute expected powers of deviation from V(s), we cannot use the actual V(s) 
-      // because we don't know the local policy at s yet. Hence we use a simple estimate based on aleph4state:
-      var estVs = midpoint(al4s); 
-      var lCup = lossCoeff4Cup != 0 ? lossCoeff4Cup * cupLoss_action(s, a, al4s, al4a) : 0, // ! recursion here !
+
+      // cheap criteria, including some myopic versions of the more expensive ones:
+      var lRandom = lossCoeff4Random != 0 ? lossCoeff4Random * randomTieBreaker(s, a) : 0,
+          lFeasibilityPower = lossCoeff4FeasibilityPower != 0 ? lossCoeff4FeasibilityPower * squared(maxFeasibleQ(s, a) - minFeasibleQ(s, a)) : 0,
+          lMP = lossCoeff4MP != 0 ? lossCoeff4MP * messingPotential_action(s, a) : 0,
+          lLRA1 = lossCoeff4LRA1 != 0 ? lossCoeff4LRA1 * LRAdev_action(s, a, al4a, true) : 0,
+          lTime1 = lossCoeff4Time1 != 0 ? lossCoeff4Time1 * (s.terminateAfterAction ? 0 : 1) : 0,
+          lEntropy1 = lossCoeff4Entropy1 != 0 ? lossCoeff4Entropy1 * behaviorEntropy_action(s, p, a, undefined) : 0,
+          lKLdiv1 = lossCoeff4KLdiv1 != 0 ? lossCoeff4KLdiv1 * behaviorKLdiv_action(s, p, a, undefined) : 0;
+
+      // moment-based criteria:
+      // (To compute expected powers of deviation from V(s), we cannot use the actual V(s) 
+      // because we don't know the local policy at s yet. Hence we use a simple estimate based on aleph4state)
+      var estVs = midpoint(al4s),
           lVariance = lossCoeff4Variance != 0 ? lossCoeff4Variance * Q2v(s, a, al4a, estVs) : 0, // ! recursion here !
           lFourth = lossCoeff4Fourth != 0 ? lossCoeff4Fourth * Q4v(s, a, al4a, estVs) : 0, // ! recursion here ! 
+          lCup = lossCoeff4Cup != 0 ? lossCoeff4Cup * cupLoss_action(s, a, al4s, al4a) : 0, // ! recursion here !
+          lLRA = lossCoeff4LRA != 0 ? lossCoeff4LRA * LRAdev_action(s, a, al4a) : 0; // ! recursion here !
+
+      // timing-related criteria:
+      var q_ones = (lossCoeff4DeltaVariation != 0 || lossCoeff4Time != 0) ? Q_ones(s, a, al4a) : undefined,
+          lTime = lossCoeff4Time != 0 ? lossCoeff4Time * q_ones : 0,
           lDeltaVariation = lossCoeff4DeltaVariation != 0 ? lossCoeff4DeltaVariation * (
               Q_DeltaSquare(s, a, al4a) / q_ones -  Q2(s, a, al4a) / squared(q_ones)
-            ) : 0, // ! recursion here !
-          lLRA = lossCoeff4LRA != 0 ? lossCoeff4LRA * LRAdev_action(s, a, al4a) : 0,
-          lMP = lossCoeff4MP != 0 ? lossCoeff4MP * messingPotential_action(s, a) : 0,
-          lKLdiv = lossCoeff4KLdiv != 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(s, p, a, al4a) : 0,
-          lEntropy = lossCoeff4Entropy != 0 ? lossCoeff4Entropy * behaviorEntropy_action(s, p, a, al4a) : 0,
-          lFeasibilityPower = lossCoeff4FeasibilityPower != 0 ? lossCoeff4FeasibilityPower * squared(maxFeasibleQ(s, a) - minFeasibleQ(s, a)) : 0,
-          lTime = lossCoeff4Time != 0 ? lossCoeff4Time * q_ones : 0,
-          lOther = otherLocalLoss && (lossCoeff4OtherLoss != 0) ? lossCoeff4otherLoss * otherLoss_action(s, a, al4a) : 0,
-          lRandom = lossCoeff4Random != 0 ? lossCoeff4Random * randomTieBreaker(s, a) : 0,
-          res = lCup + lVariance + lFourth + lDeltaVariation + lLRA + lMP + lKLdiv + lEntropy + lFeasibilityPower + lTime + lOther + lRandom;
-      if (verbose || debug) console.log(pad(s),"| | combinedLoss, state",prettyState(s),"action",a,"aleph4state",al4s,"aleph4action",al4a,"estActionProbability",p,":",res,"\n"+pad(s),"| |  ",JSON.stringify({lCup, lVariance, lFourth, lDeltaVariation, lLRA, lMP, lKLdiv, lEntropy, lFeasibilityPower, lTime, lOther, lRandom}));
+            ) : 0; // ! recursion here !
+
+      // randomization-related criteria:
+      var lEntropy = lossCoeff4Entropy != 0 ? lossCoeff4Entropy * behaviorEntropy_action(s, p, a, al4a) : 0, // ! recursion here !
+          lKLdiv = lossCoeff4KLdiv != 0 ? lossCoeff4KLdiv * behaviorKLdiv_action(s, p, a, al4a) : 0; // ! recursion here !
+
+      var lOther = otherLocalLoss && (lossCoeff4OtherLoss != 0) ? lossCoeff4otherLoss * otherLoss_action(s, a, al4a) : 0, // ! recursion here !
+          res = lRandom + lFeasibilityPower + lMP + lLRA1 + lTime1 + lEntropy1 + lKLdiv1
+                + lVariance + lFourth + lCup + lLRA 
+                + lTime + lDeltaVariation 
+                + lEntropy + lKLdiv 
+                + lOther;
+      if (verbose || debug) console.log(pad(s),"| | combinedLoss, state",prettyState(s),"action",a,"aleph4state",al4s,"aleph4action",al4a,"estActionProbability",p,":",res,"\n"+pad(s),"| |  ",JSON.stringify({
+                lRandom, lFeasibilityPower, lMP, lLRA1, lTime1, lEntropy1, lKLdiv1,
+                lVariance, lFourth, lCup, lLRA, 
+                lTime, lDeltaVariation, 
+                lEntropy, lKLdiv, 
+                lOther}));
       return res;
     });
 
