@@ -396,6 +396,39 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // - If phiHi(a) > alephHi(s) and phiLo(a) > alephLo(s), then aleph(a) = phiLo(a) + [0, alephW(s)*min(1,phiW(a)/phiW(s))]
 
 
+    // Some safety metrics do not depend on aspiration and can thus also be computed upfront,
+    // like min/maxFeasibleQ, min/maxFeasibleV:
+
+    // state's messing potential (maximal entropy (relative to some uninformedStatePrior) 
+    // over trajectories any agent could produce from here):
+    // recursive function:
+    var messingPotential_action = dp.cache(function(state, action) {
+      // Note for ANN approximation: messingPotential_action can be positive or negative. 
+      var MP = expectation(Infer({ model() {
+            if (state.terminateAfterAction){
+              return 0;
+            } else {
+              var nextState = transition(state, action),
+                  nextStateScore = transitionDistribution(state, action).score(nextState),
+                  nextMP = messingPotential_state(nextState); // ! recursion here !
+              return nextMP + (uninformedStatePriorScore ? uninformedStatePriorScore(state) : 0) - nextStateScore
+                     + (internalTransitionEntropy ? internalTransitionEntropy(state, action, nextState) : 0);
+            }
+          }}));
+      return MP;
+    });
+    // recursive function:
+    var messingPotential_state = dp.cache(function(state) {
+      var actions = stateToActions(state),
+          maxMPpolicyWeights = map(function(a) { return Math.exp(messingPotential_action(state, a)); }, actions), 
+          MP = Math.log(sum(maxMPpolicyWeights));
+      return MP;
+    });
+
+    // TODO: add further myopic (i.e., one-step) safety metrics here, e.g. myopic versions of 
+    // LRAdev, behaviorEntropy, behaviorKLdiv, cupLoss, variance, fourthMoment, DeltaVariation, time.
+
+
     // Based on the feasibility information computed above, we can now construct the policy,
     // which is a mapping taking a state and an aspiration interval as input and returning
     // a categorical distribution over (action, aleph4action) pairs.
@@ -447,7 +480,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
         // If a1's feasibility interval is completely contained in aleph4state, we are done:
         if (isSubsetOf(phi1, aleph4state)) {
 
-          if (verbose || debug) console.log("| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1",a1,"phi1",phi1,"(subset of aleph4state)");
+          if (verbose || debug) console.log(pad(state),"| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1",a1,"phi1",phi1,"(subset of aleph4state)");
           return [a1, phi1];
 
         } else {
@@ -508,7 +541,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                 
           if (debug) console.log("| localPolicyData",prettyState(state), aleph4state, {a1, estAleph1, phi1, w1, a2, estAleph2, phi2, w2, p, w, x, aleph1, aleph2});
 
-          if (verbose || debug) console.log("| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1,p,a2",a1,p,a2,"phi12",phi1,phi2,"aleph12",aleph1,aleph2);
+          if (verbose || debug) console.log(pad(state),"| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1,p,a2",a1,p,a2,"phi12",phi1,phi2,"aleph12",aleph1,aleph2);
 
           return sample(Categorical({vs: [[a1, aleph1], [a2, aleph2]], ps: [1-p, p]}));
 
@@ -662,9 +695,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // )
     ;
   
-
-    // Based on the policy, we can compute many resulting quantities of interest, 
-    // mostly using Bellman-style equations:
+    // Based on the policy, we can compute many resulting quantities of interest useful in assessing safety
+    // better than with the above myopic safety metrics. All of them satisfy Bellman-style equations:
 
     // Actual Q and V functions of resulting policy (always returning scalars):
     // ! recursive function:
@@ -1104,32 +1136,6 @@ var makeMDPAgentSatisfia = function(params_, world) {
         var actionAndAleph = sample(locPol);  // ! recursion here !
         return behaviorKLdiv_action(state, Math.exp(locPol.score(actionAndAleph)), actionAndAleph[0], actionAndAleph[1]); // ! recursion here !
       }}));
-    });
-  
-    // state's messing potential (maximal entropy (relative to some uninformedStatePrior) 
-    // over trajectories any agent could produce from here):
-    // recursive function:
-    var messingPotential_action = dp.cache(function(state, action) {
-      // Note for ANN approximation: messingPotential_action can be positive or negative. 
-      var MP = expectation(Infer({ model() {
-            if (state.terminateAfterAction){
-              return 0;
-            } else {
-              var nextState = transition(state, action),
-                  nextStateScore = transitionDistribution(state, action).score(nextState),
-                  nextMP = messingPotential_state(nextState); // ! recursion here !
-              return nextMP + (uninformedStatePriorScore ? uninformedStatePriorScore(state) : 0) - nextStateScore
-                     + (internalTransitionEntropy ? internalTransitionEntropy(state, action, nextState) : 0);
-            }
-          }}));
-      return MP;
-    });
-    // recursive function:
-    var messingPotential_state = dp.cache(function(state) {
-      var actions = stateToActions(state),
-          maxMPpolicyWeights = map(function(a) { return Math.exp(messingPotential_action(state, a)); }, actions), 
-          MP = Math.log(sum(maxMPpolicyWeights));
-      return MP;
     });
   
     // TODO: the following should maybe better be w.r.t. the initial aspiration interval, not the current state's:
