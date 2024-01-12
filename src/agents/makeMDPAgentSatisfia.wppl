@@ -66,7 +66,7 @@ In our case, we have more than one relevant table (or rather function)
 that needs to be approximated because it depends on unknown transition probabilities 
 and cannot be computed cheaply from the other quantities:
 
-- min/maxFeasibleQ and messingPotential_action can in principle be learned just as in DQN. 
+- min/maxAdmissibleQ and messingPotential_action can in principle be learned just as in DQN. 
 
 - Q, Q2, ..., Q6, Q_DeltaSquare, Q_ones and LRAdev/behaviorEntropy/behaviorKLdiv_action
   can also be approximated by suitable ANNs,
@@ -208,11 +208,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
         simulate
         → localPolicy
           → aspiration4state
-            → minFeasibleV, maxFeasibleV
-              → MIN(minFeasibleQ), MAX(maxFeasibleQ)
-                → E(minFeasibleV), E(maxFeasibleV) (RECURSION)
+            → minAdmissibleV, maxAdmissibleV
+              → MIN(minAdmissibleQ), MAX(maxAdmissibleQ)
+                → E(minAdmissibleV), E(maxAdmissibleV) (RECURSION)
           → estAspiration4action
-            → minFeasibleV, maxFeasibleV, minFeasibleQ, maxFeasibleQ
+            → minAdmissibleV, maxAdmissibleV, minAdmissibleQ, maxAdmissibleQ
           → combinedLoss
             → Q, .., Q6, Q_DeltaSquare, Q_ones
               → propagateAspiration (see below)
@@ -245,72 +245,72 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
     // or of the LRA-based problem (if maxLambda<1):
     // ! recursive function:
-    var maxFeasibleQ = dp.cache(function(state, action){
-      if (verbose || debug) console.log(pad(state),"| | | maxFeasibleQ, state",prettyState(state),"action",action,"...");
+    var maxAdmissibleQ = dp.cache(function(state, action){
+      if (verbose || debug) console.log(pad(state),"| | | maxAdmissibleQ, state",prettyState(state),"action",action,"...");
       stateActionPairsSet.add([state,action]); // register (state, action) in global store (could be anywhere, but here is just as fine as anywhere else)
       var Edel = expectedDelta(state, action),
           q = state.terminateAfterAction 
               ? Edel 
               : Edel + expectation(Infer({ model() { 
-                return maxFeasibleV(transition(state, action));  // ! recursion here ! 
+                return maxAdmissibleV(transition(state, action));  // ! recursion here ! 
               }}));  // Bellman equation
-      if (verbose || debug) console.log(pad(state),"| | | maxFeasibleQ, state",prettyState(state),"action",action,":",q);
+      if (verbose || debug) console.log(pad(state),"| | | maxAdmissibleQ, state",prettyState(state),"action",action,":",q);
       return q;
     });
     // ! recursive function:
-    var maxFeasibleV = dp.cache(function(state){
-      if (verbose || debug) console.log(pad(state),"| | | maxFeasibleV, state",prettyState(state),"...");
+    var maxAdmissibleV = dp.cache(function(state){
+      if (verbose || debug) console.log(pad(state),"| | | maxAdmissibleV, state",prettyState(state),"...");
       var actions = stateToActions(state),
-          qs = map(function(a) { return maxFeasibleQ(state, a); }, actions),  // ! recursion here !
+          qs = map(function(a) { return maxAdmissibleQ(state, a); }, actions),  // ! recursion here !
           v = maxLambda == 1 
               ? _W.max(qs) 
               : interpolate(_W.min(qs), maxLambda, _W.max(qs));
-      if (verbose || debug) console.log(pad(state),"| | | maxFeasibleV, state",prettyState(state),":",v);
+      if (verbose || debug) console.log(pad(state),"| | | maxAdmissibleV, state",prettyState(state),":",v);
       return v;
     });
   
     // Compute the Q and V functions of the corresponding minimization (!) problem (if minLambda==0)
     // or of the LRA-based problem (if minLambda>0):
     // ! recursive function:
-    var minFeasibleQ = dp.cache(function(state, action){
-      if (verbose || debug) console.log(pad(state),"| | | minFeasibleQ, state",prettyState(state),"action",action,"...");
+    var minAdmissibleQ = dp.cache(function(state, action){
+      if (verbose || debug) console.log(pad(state),"| | | minAdmissibleQ, state",prettyState(state),"action",action,"...");
       var Edel = expectedDelta(state, action),
           q = state.terminateAfterAction 
               ? Edel 
               : Edel + expectation(Infer({ model() { 
-                return minFeasibleV(transition(state, action));  // ! recursion here !
+                return minAdmissibleV(transition(state, action));  // ! recursion here !
               }}));
-      if (verbose || debug) console.log(pad(state),"| | | minFeasibleQ, state",prettyState(state),"action",action,":",q);
+      if (verbose || debug) console.log(pad(state),"| | | minAdmissibleQ, state",prettyState(state),"action",action,":",q);
       return q;
     });
     // ! recursive function:
-    var minFeasibleV = dp.cache(function(state){
-      if (verbose || debug) console.log(pad(state),"| | | minFeasibleV, state",prettyState(state),"...");
+    var minAdmissibleV = dp.cache(function(state){
+      if (verbose || debug) console.log(pad(state),"| | | minAdmissibleV, state",prettyState(state),"...");
       var actions = stateToActions(state);
-      var qs = map(function(action) { return minFeasibleQ(state, action); }, actions),  // ! recursion here !
+      var qs = map(function(action) { return minAdmissibleQ(state, action); }, actions),  // ! recursion here !
           v = minLambda == 0 
               ? _W.min(qs)
               : interpolate(_W.min(qs), minLambda, _W.max(qs));
-      if (verbose || debug) console.log(pad(state),"| | | minFeasibleV, state",prettyState(state),":",v);
+      if (verbose || debug) console.log(pad(state),"| | | minAdmissibleV, state",prettyState(state),":",v);
       return v;
     });
 
     // The resulting feasibility intervals for states and actions:
     var feasibility4state = dp.cache(function(state){
-      return [minFeasibleV(state), maxFeasibleV(state)];
+      return [minAdmissibleV(state), maxAdmissibleV(state)];
     });
     var feasibility4action = dp.cache(function(state, action){
-      return [minFeasibleQ(state, action), maxFeasibleQ(state, action)];
+      return [minAdmissibleQ(state, action), maxAdmissibleQ(state, action)];
     });
 
     // When in state, we can get any expected total in the interval
-    // [minFeasibleV(state), maxFeasibleV(state)].
+    // [minAdmissibleV(state), maxAdmissibleV(state)].
     // So when having aspiration aleph, we can still fulfill it in expectation if it lies in the interval.
     // Therefore, when in state at incoming aspiration aleph, 
     // we adjust our aspiration to aleph clipped to that interval:
     var aspiration4state = dp.cache(function(state, unclippedAleph){
       if (verbose || debug) console.log(pad(state),"| | aspiration4state, state",prettyState(state),"unclippedAleph",unclippedAleph,"...");
-      var res = clip(minFeasibleV(state), asInterval(unclippedAleph), maxFeasibleV(state));
+      var res = clip(minAdmissibleV(state), asInterval(unclippedAleph), maxAdmissibleV(state));
       if (verbose || debug) console.log(pad(state),"| | aspiration4state, state",prettyState(state),"unclippedAleph",unclippedAleph,":",res);
       return res;
     });
@@ -328,9 +328,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
       } else {
         // if rescaling4Actions == 1, we use a completely rescaled version:
-        var rescaled = interpolate(minFeasibleQ(state, action), 
-                                   relativePosition(minFeasibleV(state), aleph4state, maxFeasibleV(state)),
-                                   maxFeasibleQ(state, action));
+        var rescaled = interpolate(minAdmissibleQ(state, action), 
+                                   relativePosition(minAdmissibleV(state), aleph4state, maxAdmissibleV(state)),
+                                   maxAdmissibleQ(state, action));
         // if rescaling4Actions == 0, we use a steadfast version that does make sure that aleph(a) is no wider than aleph(s):
         // - If phi(a) contains aleph(s), then aleph(a) = aleph(s)
         // - If aleph(s) contains phi(a), then aleph(a) = phi(a)
@@ -364,10 +364,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
 
     // Some safety metrics do not depend on aspiration and can thus also be computed upfront,
-    // like min/maxFeasibleQ, min/maxFeasibleV:
+    // like min/maxAdmissibleQ, min/maxAdmissibleV:
 
-    // state's messing potential (maximal entropy (relative to some uninformedStatePrior) 
-    // over trajectories any agent could produce from here):
+    // Messing potential (maximal entropy (relative to some uninformedStatePrior) 
+    // over trajectories any agent could produce from here (see overleaf for details)):
     // recursive function:
     var messingPotential_action = dp.cache(function(state, action) {
       // Note for ANN approximation: messingPotential_action can be positive or negative. 
@@ -519,8 +519,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
                         ? indices  // still all actions are feasible
                         : ( // only actions "on the other side" are feasible
                             (phi1Lo <= alephLo) 
-                            ? filter(function(index) { return maxFeasibleQ(state, actions[index]) >= alephHi; }, indices)
-                            : filter(function(index) { return minFeasibleQ(state, actions[index]) <= alephLo; }, indices)
+                            ? filter(function(index) { return maxAdmissibleQ(state, actions[index]) >= alephHi; }, indices)
+                            : filter(function(index) { return minAdmissibleQ(state, actions[index]) <= alephLo; }, indices)
                           ),
               propensities2 = map(function(index) { return propensities[index]; }, indices2);
           // Draw a second action using a softmin mixture of these actions, based on the loss,
@@ -618,10 +618,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
           // compute the relative position of aleph4action in the expectation that we had of 
           //    delta + next feasibility interval 
           // before we knew which state we would land in:
-          var lam = relativePosition(minFeasibleQ(state, action), aleph4action, maxFeasibleQ(state, action)); 
+          var lam = relativePosition(minAdmissibleQ(state, action), aleph4action, maxAdmissibleQ(state, action)); 
           // (this is two numbers between 0 and 1.)
           // use it to rescale aleph4action to the feasibility interval of the state that we landed in:
-          var rescaledAleph4nextState = interpolate(minFeasibleV(nextState), lam, maxFeasibleV(nextState));
+          var rescaledAleph4nextState = interpolate(minAdmissibleV(nextState), lam, maxAdmissibleV(nextState));
           // (only this part preserves aspiration in expectation)
           var res = interpolate(steadfastAleph4nextState, rescaling4Successors, rescaledAleph4nextState);      
           if (verbose || debug) console.log(pad(state),"| | | propagateAspiration, state",prettyState(state),"action",action,"aleph4action",aleph4action,"Edel",Edel,"nextState",prettyState(nextState),":",res);
@@ -631,24 +631,24 @@ var makeMDPAgentSatisfia = function(params_, world) {
           It might seem that the (expected) delta received when taking action a in state s should occur
           explicitly in some form in this formula, similar to how it occurred in the steadfast formula above.
           This is not so, however. The expected delta is taken account of *implicitly* in the rescaling formula
-          via the use of min/maxFeasibleQ(s,a) to compute lam but using min/maxFeasibleV(s') in interpolating.
+          via the use of min/maxAdmissibleQ(s,a) to compute lam but using min/maxAdmissibleV(s') in interpolating.
           More precisely, one can prove that aspirations are kept in expectation. We want
 
             aleph(s,a) = E(delta(s,a)) + E(aleph(s') | s'~(s,a)).
           
           This can be shown to be true as follows:
           
-            min/maxFeasibleQ(s,a) = E(delta(s,a)) + E(min/maxFeasibleV(s') | s'~(s,a)),
+            min/maxAdmissibleQ(s,a) = E(delta(s,a)) + E(min/maxAdmissibleV(s') | s'~(s,a)),
             
-            lamdba = (aleph(s,a) - minFeasibleQ(s,a)) / (maxFeasibleQ(s,a) - minFeasibleQ(s,a)),
+            lamdba = (aleph(s,a) - minAdmissibleQ(s,a)) / (maxAdmissibleQ(s,a) - minAdmissibleQ(s,a)),
             
-            rescaledAleph(s') = minFeasibleV(s') + lambda * (maxFeasibleV(s') - minFeasibleV(s')),
+            rescaledAleph(s') = minAdmissibleV(s') + lambda * (maxAdmissibleV(s') - minAdmissibleV(s')),
             
             E(delta(s,a)) + E(rescaledAleph(s') | s'~(s,a)) 
-            = E(delta(s,a)) + E(minFeasibleV(s') | s'~(s,a)) 
-              + lambda * (E(maxFeasibleV(s') | s'~(s,a)) - E(minFeasibleV(s') | s'~(s,a)))
-            = minFeasibleQ(s,a) + lambda * (maxFeasibleQ(s,a) - minFeasibleQ(s,a))
-            = minFeasibleQ(s,a) + (aleph(s,a) - minFeasibleQ(s,a))
+            = E(delta(s,a)) + E(minAdmissibleV(s') | s'~(s,a)) 
+              + lambda * (E(maxAdmissibleV(s') | s'~(s,a)) - E(minAdmissibleV(s') | s'~(s,a)))
+            = minAdmissibleQ(s,a) + lambda * (maxAdmissibleQ(s,a) - minAdmissibleQ(s,a))
+            = minAdmissibleQ(s,a) + (aleph(s,a) - minAdmissibleQ(s,a))
             = aleph(s,a).
 
           So the above rescaling formula is correctly taking account of received delta even without explicitly
@@ -979,7 +979,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       // Note for ANN approximation: LRAdev_action must be between 0 and 0.25 
       var Edel = expectedDelta(state, action),
           res = expectation(Infer({ model() {
-            var localLRAdev = squared(0.5 - relativePosition(minFeasibleQ(state, action), midpoint(aleph4action), maxFeasibleQ(state, action)));
+            var localLRAdev = squared(0.5 - relativePosition(minAdmissibleQ(state, action), midpoint(aleph4action), maxAdmissibleQ(state, action)));
             if (state.terminateAfterAction || myopic){
               return localLRAdev;
             } else {
@@ -1162,7 +1162,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
       // cheap criteria, including some myopic versions of the more expensive ones:
       var lRandom = lossCoeff4Random != 0 ? lossCoeff4Random * randomTieBreaker(s, a) : 0,
-          lFeasibilityPower = lossCoeff4FeasibilityPower != 0 ? lossCoeff4FeasibilityPower * squared(maxFeasibleQ(s, a) - minFeasibleQ(s, a)) : 0,
+          lFeasibilityPower = lossCoeff4FeasibilityPower != 0 ? lossCoeff4FeasibilityPower * squared(maxAdmissibleQ(s, a) - minAdmissibleQ(s, a)) : 0,
           lMP = lossCoeff4MP != 0 ? lossCoeff4MP * messingPotential_action(s, a) : 0,
           lLRA1 = lossCoeff4LRA1 != 0 ? lossCoeff4LRA1 * LRAdev_action(s, a, al4a, true) : 0,
           lTime1 = lossCoeff4Time1 != 0 ? lossCoeff4Time1 * (s.terminateAfterAction ? 0 : 1) : 0,
@@ -1212,7 +1212,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     };
 
     return { 
-      minFeasibleQ, maxFeasibleQ, minFeasibleV, maxFeasibleV,
+      minAdmissibleQ, maxAdmissibleQ, minAdmissibleV, maxAdmissibleV,
       localPolicy, localPolicyData, propagateAspiration,
       Q, V, Q2, V2, Q_DeltaSquare, V_DeltaSquare, Q_ones, V_ones,
       messingPotential_state, messingPotential_action,

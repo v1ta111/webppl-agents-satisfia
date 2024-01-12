@@ -87,10 +87,10 @@ var trajData = trajDist2TrajData(trajDist, agent);
 var locActionData = webpplAgents.trajDist2LocActionData(trajDist, trajData);
 console.log("locActionData", locActionData);
 
-console.log("\nminFeasibleQ:");
-console.log(stateActionFct2ASCII(agent.minFeasibleQ, agentData.stateActionPairs));
-console.log("\nmaxFeasibleQ:");
-console.log(stateActionFct2ASCII(agent.maxFeasibleQ, agentData.stateActionPairs));
+console.log("\nminAdmissibleQ:");
+console.log(stateActionFct2ASCII(agent.minAdmissibleQ, agentData.stateActionPairs));
+console.log("\nmaxAdmissibleQ:");
+console.log(stateActionFct2ASCII(agent.maxAdmissibleQ, agentData.stateActionPairs));
 
 console.log("\nQ:");
 console.log(webpplAgents.locActionData2ASCII(locActionData.Q));
