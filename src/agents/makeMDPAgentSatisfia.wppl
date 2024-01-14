@@ -591,7 +591,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
                     return Math.max(1e-100, Math.exp(locPol.score(item)));  // 1e-100 prevents normalization problems
                   }, support);
 
-      if (verbose || debug) console.log(pad(state),"| localPolicy, state",prettyState(state),"aleph",aleph,":",[support, ps]);
+      if (verbose || debug) {
+        console.log(pad(state),"| localPolicy, state",prettyState(state),"aleph",aleph,":");
+        _W.printPolicy(pad(state), support, ps);
+      }
       return [support, ps];
 
     });

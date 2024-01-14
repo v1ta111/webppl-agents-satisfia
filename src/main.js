@@ -149,6 +149,12 @@ module.exports = {
         return asciiArt;
     },
 
+    printPolicy: function(padding, support, ps) {
+        for (var i = 0; i < support.length; i++) {
+            console.log(padding,"| | action",support[i][0],"aspiration",support[i][1],"prob.",ps[i]);
+          }  
+    },
+
     // TO BE MOVED TO src/utils/metalog.js:
 
     /* TODO:
