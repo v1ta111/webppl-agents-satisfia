@@ -3,10 +3,10 @@
 
 // TODO: see https://github.com/orgs/pik-gane/projects/2
 
-/* Note on terminology and variable naming: 
+/* Note on terminology, variable naming, and notation: 
  * - delta is what others call reward
  * - total is what others call return
- * - phi is a feasibility interval for a state or state-action
+ * - phi is a admissibility interval for a state or state-action
  * - aleph is an aspiration interval for a state or state-action
  */
 
@@ -98,7 +98,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
     // extend default parameters and options by supplied ones:
     var params = extend(extend({
-      // feasibility parameters:
+      // admissibility parameters:
       maxLambda: 1, // upper bound on local relative aspiration in each step (must be minLambda...1)
       minLambda: 0, // lower bound on local relative aspiration in each step (must be 0...maxLambda)
       // policy parameters:
@@ -107,7 +107,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       rescaling4Successors: 1, // degree (0...1) of aspiration rescaling from action to successor state. (expectation is only preserved if this is 1.0)
       // coefficients for cheap to compute loss functions:
       lossCoeff4Random: 0, // weight of random tie breaker in loss function, must be >= 0
-      lossCoeff4FeasibilityPower: 1, // weight of power of squared feasibility interval width in loss function, must be >= 0
+      lossCoeff4FeasibilityPower: 1, // weight of power of squared admissibility interval width in loss function, must be >= 0
       lossCoeff4MP: 1, // weight of messing potential in loss function, must be >= 0
       lossCoeff4LRA1: 1, // weight of current-state deviation of LRA from 0.5 in loss function, must be >= 0
       lossCoeff4Time1: 1, // weight of not terminating in loss function, must be >= 0
@@ -240,7 +240,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     });
 
 
-    // Compute upper and lower feasibility bounds for Q and V that are allowed in view of maxLambda and minLambda:
+    // Compute upper and lower admissibility bounds for Q and V that are allowed in view of maxLambda and minLambda:
   
     // Compute the Q and V functions of the classical maximization problem (if maxLambda==1)
     // or of the LRA-based problem (if maxLambda<1):
@@ -295,11 +295,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
       return v;
     });
 
-    // The resulting feasibility intervals for states and actions:
-    var feasibility4state = dp.cache(function(state){
+    // The resulting admissibility intervals for states and actions:
+    var admissibility4state = dp.cache(function(state){
       return [minAdmissibleV(state), maxAdmissibleV(state)];
     });
-    var feasibility4action = dp.cache(function(state, action){
+    var admissibility4action = dp.cache(function(state, action){
       return [minAdmissibleQ(state, action), maxAdmissibleQ(state, action)];
     });
 
@@ -317,10 +317,10 @@ var makeMDPAgentSatisfia = function(params_, world) {
   
     // When constructing the local policy, we first use an estimated action aspiration interval
     // that does not depend on the local policy but is simply based on the state's aspiration interval,
-    // rescaled from the feasibility interval of the state to the feasibility interval of the action.
+    // rescaled from the admissibility interval of the state to the admissibility interval of the action.
     var estAspiration4action = dp.cache(function(state, action, aleph4state){
       if (/*verbose ||*/ debug) console.log("| | estAspiration4action, state",prettyState(state),"action",action,"aleph4state",aleph4state,"...");
-      var phi = feasibility4action(state, action);
+      var phi = admissibility4action(state, action);
       if (isSubsetOf(phi, aleph4state)) {
 
         if (verbose || debug) console.log(pad(state),"| | estAspiration4action, state",prettyState(state),"action",action,"aleph4state",aleph4state,":",phi,"(subset of aleph4state)");
@@ -352,8 +352,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
     // TODO: Consider two other alternatives:
     // 1. Only rescale the width and not the location of the aspiration interval, 
     // and move it as close as possible to the state aspiration interval
-    // (but maybe keeping a minimal safety distance from the bounds of the feasibility interval of the action).
-    // In both cases, if the feasibility interval of the action is larger than that of the state, 
+    // (but maybe keeping a minimal safety distance from the bounds of the admissibility interval of the action).
+    // In both cases, if the admissibility interval of the action is larger than that of the state, 
     // the final action aspiration interval might need to be shrinked to fit into the aspiration interval of the state
     // once the mixture is know.
     // 2. This could be avoided by a further modification, where we rescale only downwards, never upwards:
@@ -393,7 +393,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     });
 
 
-    // Based on the feasibility information computed above, we can now construct the policy,
+    // Based on the admissibility information computed above, we can now construct the policy,
     // which is a mapping taking a state and an aspiration interval as input and returning
     // a categorical distribution over (action, aleph4action) pairs.
 
@@ -408,7 +408,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
     var localPolicyData = dp.cache(function(state, aleph){
       if (verbose || debug) console.log(pad(state),"| localPolicy, state",prettyState(state),"aleph",aleph,"...");
       
-      // Clip aspiration interval to feasibility interval of state:
+      // Clip aspiration interval to admissibility interval of state:
       var aleph4state = aspiration4state(state, aleph),
           alephLo = aleph4state[0], alephHi = aleph4state[1];
 
@@ -425,7 +425,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
       var indices = Array.from(actions.keys()),
           propensities = map(function(index) { 
             var action = actions[index],
-                loss = combinedLoss(state, action, aleph4state, estAlephs1[index], 1 / indices.length);
+                loss = combinedLoss(state, action, aleph4state, estAlephs1[index], 1 / indices.length);  // ! bottleneck !
             return Math.min(1e100, Math.max(Math.exp(-loss / lossTemperature), 1e-100)); 
           }, indices);
 
@@ -435,17 +435,17 @@ var makeMDPAgentSatisfia = function(params_, world) {
       var locPol = Infer({ model() {
 
         // Draw a first action a1 using the calculated softmin propensities,
-        // and get its feasibility interval:
+        // and get its admissibility interval:
         var i1 = sample(Categorical({vs: indices, ps: propensities})),
             a1 = actions[i1],
-            phi1 = feasibility4action(state, a1),
-            phi1Lo = phi1[0], phi1Hi = phi1[1];
+            adm1 = admissibility4action(state, a1),
+            adm1Lo = adm1[0], adm1Hi = adm1[1];
 
-        // If a1's feasibility interval is completely contained in aleph4state, we are done:
-        if (isSubsetOf(phi1, aleph4state)) {
+        // If a1's admissibility interval is completely contained in aleph4state, we are done:
+        if (isSubsetOf(adm1, aleph4state)) {
 
-          if (verbose || debug) console.log(pad(state),"| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1",a1,"phi1",phi1,"(subset of aleph4state)");
-          return [a1, phi1];
+          if (verbose || debug) console.log(pad(state),"| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1",a1,"adm1",adm1,"(subset of aleph4state)");
+          return [a1, adm1];
 
         } else {
 
@@ -473,13 +473,13 @@ var makeMDPAgentSatisfia = function(params_, world) {
           if (debug) console.log("| localPolicyData", prettyState(state), aleph4state, {a1, midTarget, estAleph1, mid1, indices2, aleph2target, estAlephs2, propensities2});
 
           // Like for a1, we now draw a2 using a softmin mixture of these actions, based on the new propentities,
-          // and get its feasibility interval:
+          // and get its admissibility interval:
           var i2 = sample(Categorical({vs: indices2, ps: propensities2})),
               a2 = actions[i2], 
-              phi2 = feasibility4action(state, a2),
-              phi2Lo = phi2[0], phi2Hi = phi2[1];
+              adm2 = admissibility4action(state, a2),
+              adm2Lo = adm2[0], adm2Hi = adm2[1];
 
-          // Now we need to find two aspiration intervals aleph1 in phi1 and aleph2 in phi2, 
+          // Now we need to find two aspiration intervals aleph1 in adm1 and aleph2 in adm2, 
           // and a probability p such that
           //   aleph1:p:aleph2 is contained in aleph4state 
           // and aleph1, aleph2 are close to the estimates we used above in estimating loss.
@@ -503,9 +503,9 @@ var makeMDPAgentSatisfia = function(params_, world) {
               aleph1 = [mid1 - x * w1, mid1 + x * w1],
               aleph2 = [mid2 - x * w2, mid2 + x * w2];
                 
-          if (debug) console.log("| localPolicyData",prettyState(state), aleph4state, {a1, estAleph1, phi1, w1, a2, estAleph2, phi2, w2, p, w, x, aleph1, aleph2});
+          if (debug) console.log("| localPolicyData",prettyState(state), aleph4state, {a1, estAleph1, adm1: adm1, w1, a2, estAleph2, adm2, w2, p, w, x, aleph1, aleph2});
 
-          if (verbose || debug) console.log(pad(state),"| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1,p,a2",a1,p,a2,"phi12",phi1,phi2,"aleph12",aleph1,aleph2);
+          if (verbose || debug) console.log(pad(state),"| | locPol, state",prettyState(state),"aleph4state",aleph4state,": a1,p,a2",a1,p,a2,"adm12",adm1,adm2,"aleph12",aleph1,aleph2);
 
           return sample(Categorical({vs: [[a1, aleph1], [a2, aleph2]], ps: [1-p, p]}));
 
@@ -514,45 +514,45 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
         if (false) {  // FIXME: this optimization version would be better but it doesn't work yet:
   
-          // For drawing the second action, possibly restrict actions so that the union of the convex hull of the two feasibility intervals covers aleph4state:
-          var indices2 = isSubsetOf(aleph4state, phi1) 
+          // For drawing the second action, possibly restrict actions so that the union of the convex hull of the two admissibility intervals covers aleph4state:
+          var indices2 = isSubsetOf(aleph4state, adm1) 
                         ? indices  // still all actions are feasible
                         : ( // only actions "on the other side" are feasible
-                            (phi1Lo <= alephLo) 
+                            (adm1Lo <= alephLo) 
                             ? filter(function(index) { return maxAdmissibleQ(state, actions[index]) >= alephHi; }, indices)
                             : filter(function(index) { return minAdmissibleQ(state, actions[index]) <= alephLo; }, indices)
                           ),
               propensities2 = map(function(index) { return propensities[index]; }, indices2);
           // Draw a second action using a softmin mixture of these actions, based on the loss,
-          // and get its feasibility interval:
+          // and get its admissibility interval:
           var i2 = sample(Categorical({vs: indices2, ps: propensities2})),
               a2 = actions[i2], 
-              phi2 = feasibility4action(state, a2),
-              phi2Lo = phi2[0], phi2Hi = phi2[1];
+              adm2 = admissibility4action(state, a2),
+              adm2Lo = adm2[0], adm2Hi = adm2[1];
 
-          if (debug) console.log("|  ", prettyState(state), aleph, indices2, a2, phi2, phi2Lo, phi2Hi);
+          if (debug) console.log("|  ", prettyState(state), aleph, indices2, a2, adm2, adm2Lo, adm2Hi);
 
-          // If a2's feasibility interval is completely contained in aleph4state, we are done:
-          if (isSubsetOf(phi2, aleph4state)) {
+          // If a2's admissibility interval is completely contained in aleph4state, we are done:
+          if (isSubsetOf(adm2, aleph4state)) {
 
             return [a2, aleph4state];
     
           } else {
     
-            // Now we need to find two aspiration intervals aleph1 in phi1 and aleph2 in phi2, 
+            // Now we need to find two aspiration intervals aleph1 in adm1 and aleph2 in adm2, 
             // and a probability p such that
             //   aleph1:p:aleph2 = aleph4state 
             // and aleph1, aleph2 are close to the estimates we used above in estimating loss.
             // To measure the error, we use the sum of the squared deviations of aleph1, aleph2 from the estimates,
-            // divided by the squared width of phi1 and phi2.
+            // divided by the squared width of adm1 and adm2.
             var estAleph1 = estAlephs1[i1], 
                 estAleph2 = estAlephs1[i2], 
-                target1Lo = estAleph1[0], target1Hi = estAleph1[1], wsq1 = squared(phi1Hi - phi1Lo),
-                target2Lo = estAleph2[0], target2Hi = estAleph2[1], wsq2 = squared(phi2Hi - phi2Lo);
+                target1Lo = estAleph1[0], target1Hi = estAleph1[1], wsq1 = squared(adm1Hi - adm1Lo),
+                target2Lo = estAleph2[0], target2Hi = estAleph2[1], wsq2 = squared(adm2Hi - adm2Lo);
 
             if (wsq1 == 0 && wsq2 == 0) {
 
-              var aleph1 = phi1, aleph2 = phi2, p = relativePosition(phi1Lo, midpoint(aleph4state), phi2Lo); 
+              var aleph1 = adm1, aleph2 = adm2, p = relativePosition(adm1Lo, midpoint(aleph4state), adm2Lo); 
               return sample(Categorical({vs: [[a1, aleph1], [a2, aleph2]], ps: [1-p, p]}));
 
             } else {
@@ -563,7 +563,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
                   d2Lo = target2Lo - alephLo, d2Hi = target2Hi - alephHi,
                   facLo = d1Lo * wsq2 - d2Lo * wsq1,
                   facHi = d1Hi * wsq2 - d2Hi * wsq1,
-                  p = clip(0, (d1Lo*facLo + d1Hi*facHi) / ((phi1Lo-phi2Lo)*facLo + (phi1Hi-phi2Hi)*facHi), 1),
+                  p = clip(0, (d1Lo*facLo + d1Hi*facHi) / ((adm1Lo-adm2Lo)*facLo + (adm1Hi-adm2Hi)*facHi), 1),
                   wsq = interpolate(wsq1, p, wsq2),
                   devLo = (alephLo - interpolate(target1Lo, p, target2Lo)) / wsq,
                   devHi = (alephHi - interpolate(target1Hi, p, target2Hi)) / wsq,
@@ -571,14 +571,14 @@ var makeMDPAgentSatisfia = function(params_, world) {
                   aleph2 = [target2Lo + devLo * wsq2, target2Hi + devHi * wsq2];
                   
               if (debug) console.log("|  ",prettyState(state), aleph4state,
-                "\n    ", a1, estAleph1, phi1, wsq1, d1Lo, d1Hi, 
-                "\n    ", a2, estAleph2, phi2, wsq2, d2Lo, d2Hi, 
+                "\n    ", a1, estAleph1, adm1, wsq1, d1Lo, d1Hi, 
+                "\n    ", a2, estAleph2, adm2, wsq2, d2Lo, d2Hi, 
                 "\n    ", facLo, facHi, p, wsq, devLo, devHi, 
                 "\n    ", aleph1, aleph2);
               // TODO: verify that the following inquality constraints are always satisfied, otherwise deal with it:
               assert.ok(0 <= p && p <= 1, "OOPS, infeasible optimal p: " + p);
-              assert.ok(isSubsetOf(aleph1, phi1), "OOPS, infeasible aleph1: " + aleph1 + " not in " + phi1);
-              assert.ok(isSubsetOf(aleph2, phi2), "OOPS, infeasible aleph2: " + aleph2 + " not in " + phi2);
+              assert.ok(isSubsetOf(aleph1, adm1), "OOPS, infeasible aleph1: " + aleph1 + " not in " + adm1);
+              assert.ok(isSubsetOf(aleph2, adm2), "OOPS, infeasible aleph2: " + aleph2 + " not in " + adm2);
 
               return sample(Categorical({vs: [[a1, aleph1], [a2, aleph2]], ps: [1-p, p]}));
             }
@@ -619,11 +619,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
         } else {
 
           // compute the relative position of aleph4action in the expectation that we had of 
-          //    delta + next feasibility interval 
+          //    delta + next admissibility interval 
           // before we knew which state we would land in:
           var lam = relativePosition(minAdmissibleQ(state, action), aleph4action, maxAdmissibleQ(state, action)); 
           // (this is two numbers between 0 and 1.)
-          // use it to rescale aleph4action to the feasibility interval of the state that we landed in:
+          // use it to rescale aleph4action to the admissibility interval of the state that we landed in:
           var rescaledAleph4nextState = interpolate(minAdmissibleV(nextState), lam, maxAdmissibleV(nextState));
           // (only this part preserves aspiration in expectation)
           var res = interpolate(steadfastAleph4nextState, rescaling4Successors, rescaledAleph4nextState);      

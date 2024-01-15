@@ -2,6 +2,11 @@
 
 Extension of webppl-agents with [additional non-maximizing agent types](/src/agents/makeMDPAgentSatisfia.wppl)
 
+To test:
+```
+webppl --require webppl-dp --require . examples/runVerySimpleGW.wppl -- --gw GW3 --verbose
+```
+
 (original README.md:)
 
 # webppl-agents

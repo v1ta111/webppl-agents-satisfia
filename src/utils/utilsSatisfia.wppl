@@ -55,7 +55,7 @@ var relativePosition = function(x, z, y) {
 }
 
 var clip = function(x, z, y) {
-    // this is denoted  x[ z ]y  in formulas
+    // this is denoted  x [ z ] y  in formulas
     if (_.isArray(x) || _.isArray(z) || _.isArray(y)) {
         // one argument is an interval, so everything becomes an interval:
         var xx = asInterval(x), zz = asInterval(z), yy = asInterval(y);
