@@ -103,8 +103,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
       minLambda: 0, // lower bound on local relative aspiration in each step (must be 0...maxLambda)  // TODO: rename to lambdaLo
       // policy parameters:
       lossTemperature: 0.1, // temperature of softmin mixture of actions w.r.t. loss, must be > 0
-      rescaling4Actions: 0, // degree (0...1) of aspiration rescaling from state to action. (larger implies larger variance) // TODO: disable this because a value of >0 can't be taken into account in a consistent way easily
-      rescaling4Successors: 1, // degree (0...1) of aspiration rescaling from action to successor state. (expectation is only preserved if this is 1.0) // TODO: disable also this since a value <1 leads to violation of the expectation guarantee 
+//      rescaling4Actions: 0, // degree (0...1) of aspiration rescaling from state to action. (larger implies larger variance) // TODO: disable this because a value of >0 can't be taken into account in a consistent way easily
+//      rescaling4Successors: 1, // degree (0...1) of aspiration rescaling from action to successor state. (expectation is only preserved if this is 1.0) // TODO: disable also this since a value <1 leads to violation of the expectation guarantee 
       // coefficients for cheap to compute loss functions:
       lossCoeff4Random: 0, // weight of random tie breaker in loss function, must be >= 0
       lossCoeff4FeasibilityPower: 1, // weight of power of squared admissibility interval width in loss function, must be >= 0
@@ -150,8 +150,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
         minLambda = params.minLambda, 
         maxLambda = params.maxLambda,
         lossTemperature = params.lossTemperature,
-        rescaling4Actions = params.rescaling4Actions,
-        rescaling4Successors = params.rescaling4Successors,
+//        rescaling4Actions = params.rescaling4Actions,
+//        rescaling4Successors = params.rescaling4Successors,
         lossCoeff4Random = params.lossCoeff4Random,
         lossCoeff4FeasibilityPower = params.lossCoeff4FeasibilityPower,
         lossCoeff4MP = params.lossCoeff4MP,
@@ -180,8 +180,8 @@ var makeMDPAgentSatisfia = function(params_, world) {
         debug = options.debug;
   
     assert.ok(lossTemperature > 0, "lossTemperature must be > 0");
-    assert.ok(0 <= rescaling4Actions <= 1, "rescaling4Actions must be in 0...1");
-    assert.ok(0 <= rescaling4Successors <= 1, "rescaling4Successors must be in 0...1");
+//    assert.ok(0 <= rescaling4Actions <= 1, "rescaling4Actions must be in 0...1");
+//    assert.ok(0 <= rescaling4Successors <= 1, "rescaling4Successors must be in 0...1");
     assert.ok(allowNegativeCoeffs || lossCoeff4Random >= 0, "lossCoeff4random must be >= 0");
     assert.ok(allowNegativeCoeffs || lossCoeff4FeasibilityPower >= 0, "lossCoeff4FeasibilityPower must be >= 0");
     assert.ok(allowNegativeCoeffs || lossCoeff4MP >= 0, "lossCoeff4MP must be >= 0");
@@ -317,7 +317,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
   
     // When constructing the local policy, we first use an estimated action aspiration interval
     // that does not depend on the local policy but is simply based on the state's aspiration interval,
-    // rescaled from the admissibility interval of the state to the admissibility interval of the action.
+    // moved from the admissibility interval of the state to the admissibility interval of the action.
     var estAspiration4action = dp.cache(function(state, action, aleph4state){
       if (/*verbose ||*/ debug) console.log("| | estAspiration4action, state",prettyState(state),"action",action,"aleph4state",aleph4state,"...");
       var phi = admissibility4action(state, action);
@@ -327,11 +327,15 @@ var makeMDPAgentSatisfia = function(params_, world) {
         return phi;
 
       } else {
+/* DISBLED:
         // if rescaling4Actions == 1, we use a completely rescaled version:
         var rescaled = interpolate(minAdmissibleQ(state, action), 
                                    relativePosition(minAdmissibleV(state), aleph4state, maxAdmissibleV(state)),
                                    maxAdmissibleQ(state, action));
-        // if rescaling4Actions == 0, we use a steadfast version that does make sure that aleph(a) is no wider than aleph(s):
+        // if rescaling4Actions == 0, we 
+*/
+
+        // We use a steadfast version that does make sure that aleph(a) is no wider than aleph(s):
         // - If phi(a) contains aleph(s), then aleph(a) = aleph(s)
         // - If aleph(s) contains phi(a), then aleph(a) = phi(a)
         // - If phiLo(a) < alephLo(s) and phiHi(a) < alephHi(s), then aleph(a) = [max(phiLo(a), phiHi(a) - alephW(s)), phiHi(a)]
@@ -341,11 +345,12 @@ var makeMDPAgentSatisfia = function(params_, world) {
                       : (phiLo < alephLo && phiHi < alephHi) ? [Math.max(phiLo, phiHi - w), phiHi] 
                       : (phiHi > alephHi && phiLo > alephLo) ? [phiLo, Math.min(phiHi, phiLo + w)] 
                       : phi;
-
+/* DISABLED:
         // We interpolate between the two versions according to rescaling4Actions:
-        var res = interpolate(steadfast, rescaling4Actions, rescaled);
+*/
+        var res = steadfast;  // WAS: interpolate(steadfast, rescaling4Actions, rescaled);
 
-        if (verbose || debug) console.log(pad(state),"| | estAspiration4action, state",prettyState(state),"action",action,"aleph4state",aleph4state,":",res,"(steadfast/rescaled)");
+        if (verbose || debug) console.log(pad(state),"| | estAspiration4action, state",prettyState(state),"action",action,"aleph4state",aleph4state,":",res,"(steadfast)");  // WAS: "(steadfast/rescaled)");
         return res;
       }
     });
@@ -606,10 +611,11 @@ var makeMDPAgentSatisfia = function(params_, world) {
 
         if (/*verbose ||*/ debug) console.log(pad(state),"| | | propagateAspiration, state",prettyState(state),"action",action,"aleph4action",aleph4action,"Edel",Edel,"nextState",prettyState(nextState),"...");
 
+/* DISABLED
         // the propagated aspiration is a mixture of a steadfast and a rescaled part:
-    
+
         var steadfastAleph4nextState = [aleph4action[0] - Edel, aleph4action[1] - Edel];
-    
+
         if (rescaling4Successors == 0.0) {
 
           var res = steadfastAleph4nextState;
@@ -617,7 +623,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           return res;
 
         } else {
-
+*/
           // compute the relative position of aleph4action in the expectation that we had of 
           //    delta + next admissibility interval 
           // before we knew which state we would land in:
@@ -626,7 +632,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           // use it to rescale aleph4action to the admissibility interval of the state that we landed in:
           var rescaledAleph4nextState = interpolate(minAdmissibleV(nextState), lam, maxAdmissibleV(nextState));
           // (only this part preserves aspiration in expectation)
-          var res = interpolate(steadfastAleph4nextState, rescaling4Successors, rescaledAleph4nextState);      
+          var res = rescaledAleph4nextState;  // WAS: interpolate(steadfastAleph4nextState, rescaling4Successors, rescaledAleph4nextState);      
           if (verbose || debug) console.log(pad(state),"| | | propagateAspiration, state",prettyState(state),"action",action,"aleph4action",aleph4action,"Edel",Edel,"nextState",prettyState(nextState),":",res);
           return res;
 
@@ -657,7 +663,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
           So the above rescaling formula is correctly taking account of received delta even without explicitly
           including Edel in the formula.
           */
-        }
+//        }
       }
     // )
     ;
