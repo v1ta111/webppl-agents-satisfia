@@ -26,6 +26,8 @@ var onlyNonnegativeFormat = function (x) {
         ;
 };
 
+var prettyState = function (state) { return "(" + state.loc[0] + "," + state.loc[1] + ")-" + state.timeLeft; };
+
 module.exports = {
 
     emptySet: () => new Set(),
@@ -153,6 +155,24 @@ module.exports = {
         for (var i = 0; i < support.length; i++) {
             console.log(padding,"| | action",support[i][0],"aspiration",support[i][1],"prob.",ps[i]);
           }  
+    },
+
+    prettyState,
+
+    trajDist2simpleJSON: function(trajDist) {
+        var keys = Object.keys(trajDist),
+            result = [];
+        for (var index in keys) {
+            var trajString = keys[index], 
+                traj = JSON.parse(trajString), 
+                val = trajDist[trajString], 
+                prob = val.prob,
+                trajOut = traj.map((stepData) => [prettyState(stepData.state), stepData.action]);
+                res = [prob, trajOut]
+                ;
+            result.push(res);
+        }
+        return result;
     },
 
     // TO BE MOVED TO src/utils/metalog.js:

@@ -78,7 +78,10 @@ var trajDist = Infer({ model() {
   return simulate(mdp.startState, aleph0).trajectory;
 }}).getDist();
 
-//console.log("trajDist", trajDist);
+console.log("\nDATA FOR REGRESSION TESTS: \ntrajDist");
+var regressionTestData = webpplAgents.trajDist2simpleJSON(trajDist);
+console.log(JSON.stringify(regressionTestData));
+console.log("END OF DATA FOR REGRESSION TESTS\n");
 
 var trajData = trajDist2TrajData(trajDist, agent);
 
