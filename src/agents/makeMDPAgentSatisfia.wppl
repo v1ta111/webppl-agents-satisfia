@@ -383,7 +383,7 @@ var makeMDPAgentSatisfia = function(params_, world) {
               var nextState = transition(state, action),
                   nextStateScore = transitionDistribution(state, action).score(nextState),
                   nextMP = messingPotential_state(nextState); // ! recursion here !
-              return nextMP + (uninformedStatePriorScore ? uninformedStatePriorScore(state) : 0) - nextStateScore
+              return nextMP + (uninformedStatePriorScore ? uninformedStatePriorScore(nextState) : 0) - nextStateScore
                      + (internalTransitionEntropy ? internalTransitionEntropy(state, action, nextState) : 0);
             }
           }}));
