@@ -85,6 +85,12 @@ console.log(
     { colors: true, depth: Number.MAX_SAFE_INTEGER }
   )
 )
+console.log(
+  webpplAgents.debug.inspect(
+    webpplAgents.debug.trajectoriesDistribution.diagrams.backward(infered),
+    { colors: true, depth: Number.MAX_SAFE_INTEGER }
+  )
+)
 console.log("END OF DATA FOR REGRESSION TESTS\n");
 
 var trajDist = infered.getDist()
