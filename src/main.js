@@ -209,6 +209,21 @@ class TrajectoriesDistributionForwardDiagramVisitor {
         vertex.associate({ P: parameters.prob } )
     }
 }
+
+class TrajectoriesDistributionBackwardDiagramVisitor {
+    static visit (root, trajectory, parameters) {
+        const reminder = [...trajectory]
+        const data = reminder.pop()
+        const vertex = root.append(data)
+        if (reminder.length > 0) {
+            vertex.visit(TrajectoriesDistributionBackwardDiagramVisitor.visit,
+                vertex, reminder, parameters
+            )
+        }
+
+        vertex.associate({ P: parameters.prob } )
+    }
+}
 // TODO: how to move the functions to other js files and still make them available in webppl code??? 
 
 var locActionData2ASCIIdefaultFormat = function (x) {
@@ -407,6 +422,14 @@ module.exports = {
                     const result = new PrefixTree()
                     for(var key in distribution) {
                         TrajectoriesDistributionForwardDiagramVisitor.visit(result, JSON.parse(key), distribution[key])
+                    }
+                    return result
+                },
+                backward: function(data) {
+                    const distribution = data.getDist()
+                    const result = new PrefixTree()
+                    for(var key in distribution) {
+                        TrajectoriesDistributionBackwardDiagramVisitor.visit(result, JSON.parse(key), distribution[key])
                     }
                     return result
                 }
