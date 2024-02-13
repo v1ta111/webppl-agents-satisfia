@@ -1,9 +1,6 @@
 // 
 
-const dynamicTrees = require('./dynamic-trees')
-const PrefixTree = dynamicTrees.structure.PrefixTree
-const TrajectoriesDistributionForwardDiagramVisitor = dynamicTrees.visitors.forward
-const TrajectoriesDistributionBackwardDiagramVisitor = dynamicTrees.visitors.backward
+const { sampling, structure, visitors } = require('./dynamic-trees')
 
 // TODO: how to move the functions to other js files and still make them available in webppl code??? 
 

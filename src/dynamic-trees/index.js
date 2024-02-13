@@ -1,4 +1,5 @@
 const structure = {
+    sampling: require('./sampling'),
     structure: {
         PrefixTree: require('./structure/prefix-tree.js')
     },
