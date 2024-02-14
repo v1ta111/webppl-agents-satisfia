@@ -1,5 +1,4 @@
 const structure = {
-    sampling: require('./sampling'),
     structure: {
         PrefixTree: require('./structure/prefix-tree.js')
     },
@@ -9,4 +8,7 @@ const structure = {
     }
 }
 
-module.exports = structure
+module.exports = function(s, k, a) {
+    console.log('dynamic-trees', s, k, a)
+    return () => k(s,[1])
+}

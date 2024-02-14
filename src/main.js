@@ -1,7 +1,3 @@
-// 
-
-const { sampling, structure, visitors } = require('./dynamic-trees')
-
 // TODO: how to move the functions to other js files and still make them available in webppl code??? 
 
 var locActionData2ASCIIdefaultFormat = function (x) {
@@ -33,7 +29,7 @@ var onlyNonnegativeFormat = function (x) {
 var prettyState = function (state) { return "(" + state.loc[0] + "," + state.loc[1] + ")-" + state.timeLeft; };
 
 module.exports = {
-
+    dynamic_trees: require('./dynamic-trees'), 
     emptySet: () => new Set(),
 
     setFrom: (arg) => new Set(arg),
@@ -192,26 +188,6 @@ module.exports = {
         inspect: function(...args) {
             const util = require('util')
             return util.inspect(...args)
-        },
-        trajectoriesDistribution: {
-            diagrams: {
-                forward: function (data) {
-                    const distribution = data.getDist()
-                    const result = new PrefixTree()
-                    for(var key in distribution) {
-                        TrajectoriesDistributionForwardDiagramVisitor.visit(result, JSON.parse(key), distribution[key])
-                    }
-                    return result
-                },
-                backward: function(data) {
-                    const distribution = data.getDist()
-                    const result = new PrefixTree()
-                    for(var key in distribution) {
-                        TrajectoriesDistributionBackwardDiagramVisitor.visit(result, JSON.parse(key), distribution[key])
-                    }
-                    return result
-                }
-            }
         }
     },
 

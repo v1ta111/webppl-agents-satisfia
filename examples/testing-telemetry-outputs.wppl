@@ -1,0 +1,2 @@
+//#! /usr/bin/env webppl --require . examples/testing-telemetry-outputs.wppl
+Infer(webpplAgents.dynamic_trees)
