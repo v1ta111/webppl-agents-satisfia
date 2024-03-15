@@ -1,2 +1,45 @@
 //#! /usr/bin/env webppl --require . examples/testing-telemetry-outputs.wppl
-Infer(webpplAgents.dynamic_trees)
+
+const env = getEnv()
+const mdp = VerySimpleGW(
+  env.argv.gw || "GW2",
+  env.argv.gwparms,
+  env.argv.time,
+  env.argv.timeOutDelta
+)
+
+const agent = makeMDPAgentSatisfia(
+  extend(
+    {},
+    {
+      expectedDelta: mdp.expectedDelta,
+      uninformedPolicy: mdp.uninformedPolicy,
+      referencePolicy: mdp.referencePolicy,
+      aleph0: argv.aleph0 || mdp.aleph0,
+      options: env.argv
+    }
+  ),
+  mdp.world
+)
+
+const Call = function(func, args) {
+  return func(args)
+}
+
+const result = Call(
+  webpplAgents.dynamic_trees.Sequence.generate,
+  {
+    agent,
+    mdp,
+    aleph0: argv.aleph0 
+  }
+)
+
+console.log(result)
+Call(
+  webpplAgents.dynamic_trees.Sequence.enumerate,
+  {
+    collection: result,
+    method: function(item) { console.log(item) }
+  }
+)
